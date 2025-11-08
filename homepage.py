@@ -212,32 +212,46 @@ params = st.query_params
 page = params.get("page", ["home"])[0] 
 
 if page == "home":
+    st.markdown("""
+    <div style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 70px;              /* 사각형 높이 */
+        background: linear-gradient(to bottom, #ffffff 60%, rgba(255,255,255,0) 100%);
+        width: 100%;
+        margin-bottom: 10px;       /* 아래 컨텐츠랑 살짝 띄우기 */
+        z-index: 9999;
+    "></div>
+    """, unsafe_allow_html=True)
     # (채팅 페이지 로직 유지)
     if 'messages' not in st.session_state:
-        st.session_state.messages = []
+        st.session_state.messages = [
+            {"role": "assistant", "content": "안녕하세요😊 당신의 집 요청 집착이에요! 🧚‍♀️<br> 원하시는 공공임대 공고를 ‘착’하고 불러와드릴게요 🏡<br>지역 / 예산 / 주택유형 아무거나 적어보세요 💬"}
+        ]
 
     # Chat Input은 리스트 출력 전에 위치해야 합니다.
     if query := st.chat_input("질문을 입력하세요."):
         st.session_state.messages.append({"role": "user", "content": query})
         # 여기에 실제 LLM 로직이 들어갈 예정입니다.
-        response = f"서울 강남구 지역의 공공임대주택을 찾아드릴게요! 🏠  \n\n현재 모집 중인 강남구 청년안심주택 및 공공임대주택 공고를 확인했어요.  \n\n### 📌 **강남구 추천 공공임대주택**  \n1. **2025년 2차 청년안심주택(강남센터 관할)**  \n   - 📍 **위치**: 서울시 강남구 일원 (세부 단지는 공고문 참조)  \n   - 💰 **임대조건**: 시세 30~50% (순위별 차등)  \n   - 📅 **신청기간**: 2025.08.11 ~ 08.13  \n   - ✅ **대상**: 만 19~39세 무주택 청년  \n   - 📐 **면적**: 20~40㎡ (원룸/투룸)  \n   - 🚗 **주차**: 입주자 필수(장애인·유자녀) 우선, 나눔카 15% 운영  \n\n2. **행복주택 강남역 인근 단지**  \n   - 📍 **위치**: 강남구 역삼동 일대  \n   - 💰 **임대조건**: 시세 60~80%  \n   - 📅 **모집**: 수시 (공고별 상이)  \n   - ✅ **대상**: 청년, 신혼부부, 일반 무주택자  \n\n### 📋 **신청 자격 예시 (청년안심주택 기준)**  \n- **소득 기준**: 도시근로자 월평균소득 70% 이하 (2인 가구 기준 약 434만원)  \n- **자산 기준**: 총자산 2억 4,800만원 이하 (1인 가구)  \n- **기타**: 무주택자, 강남구에 직장/학교 소재 시 가점  \n\n### 📍 **강남센터 연락처**  \n- **주소**: 서울시 강남구 선릉로 615 썬라이더빌딩 4층  \n- **전화**: 02-2086-9800~1  \n\n### 💡 **추천 이유**  \n- 강남구 역세권 접근성과 청년 맞춤형 조건  \n- 반려동물 동반 가능 (단, 관리규약 준수 필수)  \n\n자세한 공고문과 전자팸플릿은 [SH공사 홈페이지](https://www.i-sh.co.kr)에서 확인하실 수 있어요.  \n특정 단지나 조건이 있으시면 추가로 알려주세요! 😊  \n\n📋 **출처**:  \n- 2025년 2차 청년안심주택 입주자 모집공고 (2025-07-30)  \n- SH공사 강남센터 공고 자료"
+        response = f"안녕하세요! 집집이예요 🏠  \n보증금 2,000만원 이하의 행복주택 공고를 찾아드릴게요.  \n\n현재 모집 중인 **2025년 2차 청년안심주택(공공임대)** 공고에서 청년계층을 대상으로 **시세 30~50% 수준의 임대조건**을 제공하는 주택이 있습니다.  \n행복주택과 유사한 공공임대주택으로, 보증금 2,000만원 이하 조건에 부합하는 단지가 있을 수 있어요.  \n\n### 추천 공고 정보  \n**✅ 2025년 2차 청년안심주택(공공임대)**  \n- **대상**: 만 19~39세 무주택 청년  \n- **임대조건**: 시중 시세의 30~50% (순위에 따라 차등 적용)  \n- **보증금 예시**:  \n  - 시세 1억원 주택 → 보증금 약 **3,000~5,000만원** (단, 일부 단지는 보증금 지원 혜택 적용 가능)  \n- **신청기간**: 2025.08.11 ~ 08.13  \n- **입주예정**: 2026.01.30 ~ 03.03  \n\n### 보증금 2,000만원 이하 주택 찾기 팁  \n1. **지역별 주거안심종합센터**에 문의하시면 보증금 지원 프로그램(예: 청년전용 임대보증금 대출)을 안내받을 수 있어요.  \n   - 예: 강남센터 (02-2086-9800), 마포센터 (02-380-0100) 등  \n2. **행복주택**의 경우, 보증금 조건은 단지별로 상이하므로 [SH공사 홈페이지](https://www.i-sh.co.kr)에서 \"행복주택\"으로 검색해보세요.  \n\n### 추가 안내  \n- 현재 공고에는 정확한 보증금 금액이 명시되지 않았으나, **청년안심주택은 시세 대비 30~50% 할인**되므로 저렴한 단지를 찾을 수 있을 거예요.  \n- 신청 전 반드시 **공고문의 \"임대조건\" 항목**을 확인하시거나, 해당 지역 센터에 문의해 주세요!  \n\n📋 **출처**: 2025년 2차 청년안심주택 입주자 모집공고 (2025-07-30)  \n\n더 자세한 조건이 있으시면 언제든 알려주세요! 😊"
         st.session_state.messages.append({"role": "assistant", "content": response})
     
     # 메시지 표시
     for i, message in enumerate(st.session_state.messages):
-        margin_top = "50px" if i == 0 else "10px"
+        margin_top = "0px" if i == 0 else "10px"
         if message['role'] == 'user':
             st.markdown(
                 f"""
-                <div style="display:flex; justify-content:flex-end; margin-top:{margin_top}; margin-bottom:10px;">
+                <div style="display:flex; justify-content:flex-end; margin-top:{margin_top}; margin-bottom:20px;">
                     <div style="
                         background-color:#D0F0C0;
-                        padding:10px;
-                        border-radius:10px;
+                        padding:20px;
+                        border-radius:15px;
                         max-width:60%;
                         word-wrap:break-word;
                     ">
-                        <b>User:</b> {message['content']}
+                        {message['content']}
                     </div>
                 </div>
                 """,
@@ -246,15 +260,15 @@ if page == "home":
         else:
             st.markdown(
                 f"""
-                <div style="display:flex; justify-content:flex-start; margin-top:{margin_top}; margin-bottom:10px;">
+                <div style="display:flex; justify-content:flex-start; margin-top:{margin_top}; margin-bottom:20px;">
                     <div style="
                         background-color:#F0F0F0;
-                        padding:10px;
-                        border-radius:10px;
+                        padding:20px;
+                        border-radius:15px;
                         max-width:60%;
                         word-wrap:break-word;
                     ">
-                        <b>Assistant:</b> {message['content']}
+                        {message['content']}
                     </div>
                 </div>
                 """,
@@ -285,6 +299,117 @@ elif page == "search":
         padding: 0;
         margin: 0;
     }
+    .detail-panel {
+        position: fixed;
+        top: 90px;
+        right: 40px;
+        width: 380px;
+        max-height: 78vh;
+        background: #ffffff;
+        border-radius: 18px;
+        box-shadow: 0 6px 24px rgba(15,23,42,0.12);
+        padding: 0;
+        overflow-y: auto;
+        z-index: 9999;
+        border: 1px solid rgba(15,23,42,0.03);
+    }
+    .detail-header {
+        padding: 16px 20px 12px 20px;
+        border-bottom: 1px solid #edf1f3;
+    }
+    .detail-badge {
+        display: inline-block;
+        background: #E6F7EF;
+        color: #11835E;
+        padding: 3px 10px 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        margin-bottom: 10px;
+    }
+    .detail-title {
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1.4;
+        margin-bottom: 4px;
+    }
+    .detail-sub {
+        font-size: 13px;
+        color: #6b7280;
+    }
+    .detail-meta {
+        display: flex;
+        gap: 10px;
+        font-size: 11.5px;
+        color: #94a3b8;
+        margin-top: 8px;
+    }
+    .detail-tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid #edf1f3;
+        margin-top: 6px;
+    }
+    .detail-tab {
+        flex: 1;
+        text-align: center;
+        padding: 10px 0;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        background: #fff;
+    }
+    .detail-tab.active {
+        color: #0f766e;
+        border-bottom: 2px solid #0f766e;
+    }
+    .detail-body {
+        padding: 16px 20px 18px 20px;
+    }
+    .section-title {
+        font-weight: 600;
+        margin-bottom: 10px;
+        font-size: 14px;
+    }
+    .section-box {
+        background: #f8fafc;
+        border: 1px solid rgba(15,23,42,0.02);
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+        font-size: 13px;
+    }
+    .section-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        font-size: 13px;
+    }
+    .section-label {
+        color: #64748b;
+    }
+    .section-value {
+        font-weight: 500;
+    }
+    .detail-footer {
+        position: sticky;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background: #10B981;
+        color: #ffffff;
+        text-align: center;
+        font-weight: 600;
+        font-size: 15px;
+        padding: 14px 0;
+        border-top: 1px solid rgba(0,0,0,0.05);
+        border-bottom-left-radius: 18px;
+        border-bottom-right-radius: 18px;
+        cursor: pointer;
+        transition: background 0.2s ease-in-out;
+    }
+    .detail-footer:hover {
+        background: #0f9c74;
+    }            
     </style>
     """, unsafe_allow_html=True)
 
@@ -316,7 +441,11 @@ elif page == "search":
         if "applied_price" not in st.session_state: st.session_state.applied_price = None 
         if "area_slider" not in st.session_state: st.session_state.area_slider = (0, 150)   # 주택 면적(㎡)
         if "applied_area" not in st.session_state: st.session_state.applied_area = None
-
+        if "selected_listing" not in st.session_state: st.session_state.selected_listing = None
+        if "detail_tab" not in st.session_state:
+            st.session_state.detail_tab = "content"
+        if "last_map_click" not in st.session_state:
+            st.session_state.last_map_click = None
         with col_input:
             st.markdown('<div style="height:4px;"></div>', unsafe_allow_html=True)
             # 텍스트 입력 CSS는 전체 스타일 블록에 통합됨
@@ -422,7 +551,15 @@ elif page == "search":
 
         # 예시 공고 리스트 (데이터 유지)
         listings = [
-            {"name": "서울 강남구 역삼 행복주택", "location": "서울 강남구", "price": "보증금 2000만원 / 월 35만원", "image": "seoul_gangnam_1.jpg"},
+            {
+                "name": "서울 강남구 역삼 행복주택",
+                "location": "서울특별시 강남구 테헤란로 201 (역삼동)",
+                "price": "보증금 2000만원 / 월 35만원",
+                "area": "36.66㎡~",
+                "deposit": "8.1백~",
+                "lat": 37.5008,
+                "lon": 127.0365
+            },
             {"name": "서울 마포구 상암 청년전세임대", "location": "서울 마포구", "price": "보증금 1000만원 / 월 18만원", "image": "seoul_mapo_1.jpg"},
             {"name": "서울 노원구 공릉 국민임대", "location": "서울 노원구", "price": "보증금 1500만원 / 월 22만원", "image": "seoul_nowon_1.jpg"},
             {"name": "서울 송파구 가락 행복주택", "location": "서울 송파구", "price": "보증금 2500만원 / 월 28만원", "image": "seoul_songpa_1.jpg"},
@@ -470,7 +607,6 @@ elif page == "search":
             {"name": "경북 구미시 국민임대", "location": "경북 구미시", "price": "보증금 1100만원 / 월 18만원", "image": "gyeongbuk_gumi_1.jpg"}
         ]
 
-
         # ---- 페이지네이션 (공고 리스트 아래) ----
         items_per_page = 5  
         if "page_num" not in st.session_state:
@@ -502,30 +638,90 @@ elif page == "search":
         
         st.markdown('<div style="height:20px;"></div>', unsafe_allow_html=True)
 
-        # 공고 리스트 출력 (유지)
-        for item in page_items:
-            # 검색 키워드 필터링 (필터 상태는 반영되지 않음)
-            if keyword.lower() in item["name"].lower():
-                image_src = apt_base64_src if apt_base64_src else "https://via.placeholder.com/80x80?text=No+Img"
+        st.markdown("""
+        <style>
+        .listing-btn > button {
+            width: 100%;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+            padding: 14px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+        }
+        .listing-btn > button:hover {
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+        }
+        .listing-text {
+            text-align: left;
+        }
+        .listing-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .listing-sub {
+            font-size: 13px;
+            line-height: 1.3;
+        }
+        .listing-img {
+            width: 78px;
+            height: 78px;
+            border-radius: 10px;
+            object-fit: cover;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # 2) 공고 리스트 출력
+        if "selected_listing" not in st.session_state:
+            st.session_state.selected_listing = None
+
+        for idx, item in enumerate(page_items):
+            # 이미지 소스 그대로
+            image_src = apt_base64_src if apt_base64_src else "https://via.placeholder.com/80x80?text=No+Img"
+
+            # 버튼으로 만들기
+            with st.container():
+                clicked = st.button(
+                    # 버튼 안에 들어갈 텍스트는 한 줄짜리여야 해서, 아래에서 바로 HTML로 한 번 더 감싸줄 거야
+                    " ",  # 내용은 비워둘게
+                    key=f"listing_{idx}",
+                    type="secondary",
+                    use_container_width=True
+                )
+                # 버튼 위에 우리가 원하는 모양을 올린다
                 st.markdown(f"""
-                <div class="listing-card" style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="flex-grow: 1;">
-                        <b>{item['name']}</b><br>
-                        📍 {item['location']}<br>
-                        💰 {item['price']}
+                <div style="
+                    position:relative;
+                    top:-62px;
+                    pointer-events:none;
+                    width:100%;                 /* ✅ 전체 폭 채우기 */
+                    box-sizing:border-box;      /* ✅ padding 줘도 안 줄어들게 */
+                    background:#F8F9FA;
+                    border-radius:16px;
+                    box-shadow:0 4px 12px rgba(15,23,42,0.08);
+                    padding:14px 16px;          /* ✅ 안쪽 여백 */
+                    margin-bottom:-45px;
+                ">                    
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                        <div class="listing-text">
+                            <div class="listing-title">{item['name']}</div>
+                            <div class="listing-sub">📍 {item['location']}</div>
+                            <div class="listing-sub">💰 {item['price']}</div>
+                        </div>
+                        <img src="{image_src}" class="listing-img">
                     </div>
-                    <img src="{image_src}" style="
-                        width:80px;
-                        height:80px;
-                        border-radius:8px;
-                        object-fit:cover;
-                        margin-left:15px;
-                    ">
                 </div>
                 """, unsafe_allow_html=True)
+                # 버튼이 위아래로 좀 높아졌으니 간격 보정
+
+            if clicked:
+                st.session_state.selected_listing = item
 
         # 페이지네이션 버튼 (유지)
-        st.markdown('<div style="margin-top:30px;">', unsafe_allow_html=True) 
         max_buttons = 5
         current = st.session_state.page_num
 
@@ -542,6 +738,7 @@ elif page == "search":
         with cols[0]:
             if st.button("◀", key="prev_page_btn") and st.session_state.page_num > 1:
                 st.session_state.page_num -= 1
+                st.session_state.selected_listing = None
         for i, page_num in enumerate(range(start_page, end_page+1)):
             with cols[i+1]:
                 if page_num == st.session_state.page_num:
@@ -567,12 +764,15 @@ elif page == "search":
                 else:
                     if st.button(str(page_num), key=f"page_btn_{page_num}"):
                         st.session_state.page_num = page_num
+                        st.session_state.selected_listing = None
         with cols[-1]:
             if st.button("▶", key="next_page_btn") and st.session_state.page_num < total_pages:
                 st.session_state.page_num += 1
+                st.session_state.selected_listing = None
                 
     # ---- 오른쪽: 지도 영역 ----
     with col_map:
+
         # (지도 로직 유지)
         region_coords = {
             "서울": [37.5665, 126.9780], "경기": [37.4138, 127.5183], "인천": [37.4563, 126.7052], 
@@ -608,7 +808,33 @@ elif page == "search":
             
         # folium 지도 생성
         m = folium.Map(location=[36.5, 127.8], zoom_start=7)
+        js_global_toggle = """
+        function toggleIndividualMarkers(currentZoom) {
+            // 개별 마커 (클래스 이름: individual-listing-marker)를 선택
+            var individualMarkers = document.querySelectorAll('.individual-listing-marker');
+            
+            // Zoom 13 이상일 때만 개별 마커를 표시
+            individualMarkers.forEach(function(marker) {
+                if (currentZoom >= 13) {
+                    marker.style.display = 'block'; 
+                } else {
+                    marker.style.display = 'none'; 
+                }
+            });
+        }
 
+        // 지도의 'zoomend' 이벤트에 리스너를 추가하여 확대/축소 시마다 개별 마커를 제어
+        map.on('zoomend', function() {
+            toggleIndividualMarkers(map.getZoom());
+        });
+
+        // 페이지 로드 후 한 번 실행하여 초기 상태 설정
+        setTimeout(function() {
+            toggleIndividualMarkers(map.getZoom());
+        }, 500);
+        """
+
+        m.get_root().html.add_child(folium.Element(f'<script>{js_global_toggle}</script>'))
         def create_custom_icon(region_name, count, lat, lon):
             if count == 0:
                 header_bg_color = "#1E90FF"
@@ -678,7 +904,143 @@ elif page == "search":
                     icon=region_icon,
                     z_index_offset=count*1000
                 ).add_to(m)
+        for item in listings:
+            # lat, lon 데이터가 있는 항목만 마커를 생성합니다. (1번의 데이터 수정 필수)
+            if 'lat' in item and 'lon' in item:
+                # 요청하신 이미지 형태의 HTML 팝업 스타일
+                popup_html = f"""
+                <div class="individual-listing-marker">
+                <div style="
+                    background-color: rgba(255,255,255,0.98);
+                    border: 1px solid #333; /* 검정색 테두리 */
+                    border-radius: 4px;
+                    padding: 8px 12px;
+                    font-family: 'Malgun Gothic', sans-serif;
+                    text-align: center;
+                    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+                    width: 110px; /* 너비 확장 */
+                    white-space: nowrap;
+                ">
+                    <b style="
+                        background-color: #333; 
+                        color: white; 
+                        padding: 2px 5px; 
+                        border-radius: 3px; 
+                        font-size: 11px;
+                        display: block; /* 블록 요소로 만들어 팝업 폭 전체를 채웁니다 */
+                        margin: -8px -12px 6px -12px; /* 팝업의 패딩을 침범하도록 마진 설정 */
+                    ">{item['name'].split()[2]}</b>
+                    
+                    <span style="font-size: 13px; color: #444;">{item['area']}</span><br>
+                    <span style="color:#007bff; font-weight:700; font-size: 15px;">{item['deposit']}</span>
+                </div>
+                </div>
+                """
+                # DivIcon을 사용하여 HTML을 마커 아이콘으로 사용
+                icon = folium.DivIcon(
+                    html=popup_html,
+                    # 아이콘의 기준점 조정 (팝업이 마커의 하단 중앙에 위치하도록)
+                    icon_anchor=(55, 60) 
+                )
+                
+                # 지도에 마커 추가
+                folium.Marker(
+                    location=[item['lat'], item['lon']],
+                    icon=icon,
+                    tooltip=item['name'] # 마우스를 올렸을 때 이름 표시
+                ).add_to(m)
+        map_event = st_folium(m, width="100%", height=845)
+        new_click = None
+        if map_event:
+            new_click = map_event.get("last_clicked")  # {'lat': ..., 'lng': ...} 형태
 
-        st_folium(m, width="100%", height=845)
+        # 3) '새로운' 지도 클릭이면 → 패널 닫고, 클릭값 저장하고 rerun
+        if new_click and new_click != st.session_state.last_map_click:
+            st.session_state.last_map_click = new_click
+            st.session_state.selected_listing = None
+            st.rerun()
+        selected = st.session_state.selected_listing
+        if selected:
+            공고일 = "25.11.07"
+            접수일 = "25.11.25 ~ 25.11.27"
+            조회수 = "193"
+            공급대상 = "무주택 청년, 대학생(청년), 신혼부부 등"
+            공급지역 = selected["location"]
+            모집단지 = "1개 단지 (총 모집호수 93)"
 
+            st.markdown(f"""
+            <div class="detail-panel">
+                <div class="detail-header">
+                    <div class="detail-badge">{selected.get('type', '공공임대')}</div>
+                    <div class="detail-title">{selected['name']}</div>
+                    <div class="detail-sub">{selected['location']}</div>
+                    <div class="detail-meta">
+                        <div>공고일 {공고일}</div>
+                        <div>접수일 {접수일}</div>
+                        <div>조회 {조회수}</div>
+                    </div>
+                </div>
+                <div class="detail-body">
+                    <div class="section-title">공급대상 및 임대조건</div>
+                    <div class="section-box">
+                        <div class="section-row">
+                            <span class="section-label">공급대상</span>
+                            <span class="section-value">{공급대상}</span>
+                        </div>
+                        <div class="section-row">
+                            <span class="section-label">공급지역</span>
+                            <span class="section-value">{공급지역}</span>
+                        </div>
+                        <div class="section-row">
+                            <span class="section-label">임대조건</span>
+                            <span class="section-value">{selected['price']}</span>
+                        </div>
+                    </div>
+                    <div class="section-title" style="margin-top:14px;">모집단지</div>
+                    <div class="section-box">
+                        <div class="section-row">
+                            <span class="section-label">모집단지</span>
+                            <span class="section-value">{모집단지}</span>
+                        </div>
+                        <div style="margin-top:6px; font-size:12.5px; color:#0f766e; cursor:pointer;">
+                            단지 상세보기 &rsaquo;
+                        </div>
+                    </div>
+                    <div class="section-title" style="margin-top:14px;">공급일정</div>
+                    <div class="section-box" style="padding:0;">
+                        <div style="display:flex; border-bottom:1px solid #e2e8f0;">
+                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">접수기간</div>
+                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2025.11.24 ~ 2025.11.28</div>
+                        </div>
+                        <div style="display:flex; border-bottom:1px solid #e2e8f0;">
+                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">서류제출대상자 발표일</div>
+                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2025.12.12</div>
+                        </div>
+                        <div style="display:flex; border-bottom:1px solid #e2e8f0;">
+                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">서류접수기간</div>
+                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2025.12.15 ~ 2025.12.19</div>
+                        </div>
+                        <div style="display:flex; border-bottom:1px solid #e2e8f0;">
+                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">당첨자발표일</div>
+                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2026.04.17</div>
+                        </div>
+                        <div style="display:flex;">
+                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">계약기간</div>
+                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2026.05.12 ~ 2026.05.14</div>
+                        </div>
+                    </div>
+                    <div class="section-title" style="margin-top:14px;">문의</div>
+                    <div class="section-box">
+                        LH / SH 고객센터<br>
+                        접수 전 공고문 원문을 반드시 확인하세요.
+                    </div>
+                </div>
+                  <a href="https://www.i-sh.co.kr/main/lay2/program/S1T294C295/www.jbdc.co.kr" 
+                    target="_blank" style="text-decoration:none;">
+                    <div class="detail-footer">공고 원문보기</div>
+                </a>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
 st.markdown('</div>', unsafe_allow_html=True)
