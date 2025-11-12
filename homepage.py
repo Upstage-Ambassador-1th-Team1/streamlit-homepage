@@ -951,7 +951,7 @@ elif page == "search":
                 text-align: center;
                 overflow: hidden;
                 width: 95px;
-                opacity: 0.6;
+                opacity: 0;
             ">
                 <!-- 상단 검정 헤더 -->
                 <div style="
