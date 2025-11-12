@@ -3,6 +3,25 @@ from streamlit_folium import st_folium
 import folium
 import base64
 import os
+from folium import Element
+import time
+import requests
+
+KAKAO_API_KEY = "102d0b0b719c47186ef3afa94f03e00d"  # 예: "46c0a0f1e9f1a0...."
+def kakao_geocode(address: str):
+    """카카오 주소검색으로 lat, lon 반환"""
+    url = "https://dapi.kakao.com/v2/local/search/address.json"
+    headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
+    params = {"query": address}
+    res = requests.get(url, headers=headers, params=params, timeout=5)
+    if res.status_code == 200:
+        data = res.json()
+        docs = data.get("documents")
+        if docs:
+            lat = float(docs[0]["y"])  # 위도
+            lon = float(docs[0]["x"])  # 경도
+            return lat, lon
+    return None, None
 
 st.set_page_config(page_title="홈 페이지", layout="wide")
 
@@ -446,6 +465,11 @@ elif page == "search":
             st.session_state.detail_tab = "content"
         if "last_map_click" not in st.session_state:
             st.session_state.last_map_click = None
+        if "selected_region" not in st.session_state:
+            st.session_state.selected_region = None
+        if "allowDetailMarkers" not in st.session_state:
+            st.session_state.allowDetailMarkers = False
+
         with col_input:
             st.markdown('<div style="height:4px;"></div>', unsafe_allow_html=True)
             # 텍스트 입력 CSS는 전체 스타일 블록에 통합됨
@@ -548,65 +572,75 @@ elif page == "search":
                     # 여기서는 간단히 rerun하지 않고, 다음에 리스트를 그릴 때 세션 상태를 사용하도록 합니다.
                     st.toast("필터가 적용되었습니다.")
 
-
-        # 예시 공고 리스트 (데이터 유지)
         listings = [
-            {
-                "name": "서울 강남구 역삼 행복주택",
-                "location": "서울특별시 강남구 테헤란로 201 (역삼동)",
-                "price": "보증금 2000만원 / 월 35만원",
-                "area": "36.66㎡~",
-                "deposit": "8.1백~",
-                "lat": 37.5008,
-                "lon": 127.0365
-            },
-            {"name": "서울 마포구 상암 청년전세임대", "location": "서울 마포구", "price": "보증금 1000만원 / 월 18만원", "image": "seoul_mapo_1.jpg"},
-            {"name": "서울 노원구 공릉 국민임대", "location": "서울 노원구", "price": "보증금 1500만원 / 월 22만원", "image": "seoul_nowon_1.jpg"},
-            {"name": "서울 송파구 가락 행복주택", "location": "서울 송파구", "price": "보증금 2500만원 / 월 28만원", "image": "seoul_songpa_1.jpg"},
-            {"name": "서울 관악구 봉천 청년매입임대", "location": "서울 관악구", "price": "보증금 800만원 / 월 20만원", "image": "seoul_gwanak_1.jpg"},
-            {"name": "경기 수원시 권선 국민임대", "location": "경기 수원시", "price": "보증금 1200만원 / 월 19만원", "image": "gyeonggi_suwon_1.jpg"},
-            {"name": "경기 고양시 덕양 행복주택", "location": "경기 고양시", "price": "보증금 2000만원 / 월 24만원", "image": "gyeonggi_goyang_1.jpg"},
-            {"name": "경기 성남시 수정 국민임대", "location": "경기 성남시", "price": "보증금 1800만원 / 월 26만원", "image": "gyeonggi_seongnam_1.jpg"},
-            {"name": "경기 안양시 동안 행복주택", "location": "경기 안양시", "price": "보증금 1500만원 / 월 21만원", "image": "gyeonggi_anyang_1.jpg"},
-            {"name": "부산 해운대구 국민임대", "location": "부산 해운대구", "price": "보증금 1600만원 / 월 25만원", "image": "busan_haeundae_1.jpg"},
-            {"name": "부산 사하구 행복주택", "location": "부산 사하구", "price": "보증금 1400만원 / 월 22만원", "image": "busan_saha_1.jpg"},
-            {"name": "부산 동래구 청년임대", "location": "부산 동래구", "price": "보증금 900만원 / 월 18만원", "image": "busan_dongnae_1.jpg"},
-            {"name": "부산 북구 국민임대", "location": "부산 북구", "price": "보증금 1700만원 / 월 24만원", "image": "busan_buk_1.jpg"},
-            {"name": "부산 수영구 행복주택", "location": "부산 수영구", "price": "보증금 2000만원 / 월 27만원", "image": "busan_suyeong_1.jpg"},
-            {"name": "대구 수성구 행복주택", "location": "대구 수성구", "price": "보증금 1500만원 / 월 23만원", "image": "daegu_suseong_1.jpg"},
-            {"name": "대구 달서구 국민임대", "location": "대구 달서구", "price": "보증금 1200만원 / 월 19만원", "image": "daegu_dalseo_1.jpg"},
-            {"name": "대구 북구 청년임대", "location": "대구 북구", "price": "보증금 800만원 / 월 17만원", "image": "daegu_buk_1.jpg"},
-            {"name": "대구 동구 행복주택", "location": "대구 동구", "price": "보증금 1300만원 / 월 21만원", "image": "daegu_dong_1.jpg"},
-            {"name": "대구 중구 매입임대", "location": "대구 중구", "price": "보증금 900만원 / 월 18만원", "image": "daegu_jung_1.jpg"},
-            {"name": "인천 서구 검단 행복주택", "location": "인천 서구", "price": "보증금 2000만원 / 월 25만원", "image": "incheon_seo_1.jpg"},
-            {"name": "인천 남동구 청년전세임대", "location": "인천 남동구", "price": "보증금 1000만원 / 월 16만원", "image": "incheon_namdong_1.jpg"},
-            {"name": "인천 부평구 국민임대", "location": "인천 부평구", "price": "보증금 1800만원 / 월 23만원", "image": "incheon_bupyeong_1.jpg"},
-            {"name": "인천 중구 행복주택", "location": "인천 중구", "price": "보증금 1500만원 / 월 20만원", "image": "incheon_jung_1.jpg"},
-            {"name": "광주 북구 행복주택", "location": "광주 북구", "price": "보증금 1300만원 / 월 22만원", "image": "gwangju_buk_1.jpg"},
-            {"name": "광주 남구 국민임대", "location": "광주 남구", "price": "보증금 1100만원 / 월 19만원", "image": "gwangju_nam_1.jpg"},
-            {"name": "광주 서구 청년임대", "location": "광주 서구", "price": "보증금 900만원 / 월 17만원", "image": "gwangju_seo_1.jpg"},
-            {"name": "광주 동구 행복주택", "location": "광주 동구", "price": "보증금 1200만원 / 월 20만원", "image": "gwangju_dong_1.jpg"},
-            {"name": "광주 광산구 국민임대", "location": "광주 광산구", "price": "보증금 1400만원 / 월 23만원", "image": "gwangju_gwangsan_1.jpg"},
-            {"name": "대전 서구 행복주택", "location": "대전 서구", "price": "보증금 1800만원 / 월 24만원", "image": "daejeon_seo_1.jpg"},
-            {"name": "대전 유성구 국민임대", "location": "대전 유성구", "price": "보증금 1500만원 / 월 21만원", "image": "daejeon_yuseong_1.jpg"},
-            {"name": "대전 동구 청년임대", "location": "대전 동구", "price": "보증금 1000만원 / 월 18만원", "image": "daejeon_dong_1.jpg"},
-            {"name": "대전 중구 행복주택", "location": "대전 중구", "price": "보증금 1300만원 / 월 20만원", "image": "daejeon_jung_1.jpg"},
-            {"name": "대전 대덕구 국민임대", "location": "대전 대덕구", "price": "보증금 1200만원 / 월 19만원", "image": "daejeon_daedeok_1.jpg"},
-            {"name": "세종시 아름 행복주택", "location": "세종특별자치시", "price": "보증금 2000만원 / 월 26만원", "image": "sejong_1.jpg"},
-            {"name": "강원 춘천시 국민임대", "location": "강원 춘천시", "price": "보증금 1100만원 / 월 18만원", "image": "gangwon_chuncheon_1.jpg"},
-            {"name": "강원 원주시 행복주택", "location": "강원 원주시", "price": "보증금 1500만원 / 월 21만원", "image": "gangwon_wonju_1.jpg"},
-            {"name": "강원 강릉시 청년임대", "location": "강원 강릉시", "price": "보증금 800만원 / 월 17만원", "image": "gangwon_gangneung_1.jpg"},
-            {"name": "제주 제주시 국민임대", "location": "제주 제주시", "price": "보증금 1600만원 / 월 23만원", "image": "jeju_jeju_1.jpg"},
-            {"name": "제주 서귀포시 행복주택", "location": "제주 서귀포시", "price": "보증금 1400만원 / 월 21만원", "image": "jeju_seogwipo_1.jpg"},
-            {"name": "울산 남구 국민임대", "location": "울산 남구", "price": "보증금 1300만원 / 월 20만원", "image": "ulsan_nam_1.jpg"},
-            {"name": "울산 북구 행복주택", "location": "울산 북구", "price": "보증금 1100만원 / 월 19만원", "image": "ulsan_buk_1.jpg"},
-            {"name": "충북 청주시 국민임대", "location": "충북 청주시", "price": "보증금 1500만원 / 월 22만원", "image": "chungbuk_cheongju_1.jpg"},
-            {"name": "전북 전주시 행복주택", "location": "전북 전주시", "price": "보증금 1400만원 / 월 20만원", "image": "jeonbuk_jeonju_1.jpg"},
-            {"name": "경남 창원시 청년임대", "location": "경남 창원시", "price": "보증금 1000만원 / 월 17만원", "image": "gyeongnam_changwon_1.jpg"},
-            {"name": "경북 포항시 행복주택", "location": "경북 포항시", "price": "보증금 1300만원 / 월 20만원", "image": "gyeongbuk_pohang_1.jpg"},
-            {"name": "경북 구미시 국민임대", "location": "경북 구미시", "price": "보증금 1100만원 / 월 18만원", "image": "gyeongbuk_gumi_1.jpg"}
+            {"name": "서울 강남구 역삼 행복주택", "location": "서울특별시 강남구 테헤란로 201 (역삼동)", "deposit": "보증금 2000만원 / 월 35만원", "area": "36.7㎡"},
+            {"name": "서울 마포구 상암 청년전세임대", "location": "서울특별시 마포구 월드컵북로 400 (상암동)", "deposit": "보증금 1000만원 / 월 18만원", "area": "29.8㎡"},
+            {"name": "서울 노원구 공릉 국민임대", "location": "서울특별시 노원구 동일로 138길 42 (공릉동)", "deposit": "보증금 1500만원 / 월 22만원", "area": "34.2㎡"},
+            {"name": "서울 송파구 가락 행복주택", "location": "서울특별시 송파구 중대로 140 (가락동)", "deposit": "보증금 2500만원 / 월 28만원", "area": "33.5㎡"},
+            {"name": "서울 관악구 봉천 청년매입임대", "location": "서울특별시 관악구 봉천로 227 (봉천동)", "deposit": "보증금 800만원 / 월 20만원", "area": "26.9㎡"},
+            {"name": "경기 수원시 권선 국민임대", "location": "경기도 수원시 권선구 권선로 308 (권선동)", "deposit": "보증금 1200만원 / 월 19만원", "area": "31.4㎡"},
+            {"name": "경기 고양시 덕양 행복주택", "location": "경기도 고양시 덕양구 행주로 50 (행주동)", "deposit": "보증금 2000만원 / 월 24만원", "area": "30.5㎡"},
+            {"name": "경기 성남시 수정 국민임대", "location": "경기도 성남시 수정구 수정로 123 (신흥동)", "deposit": "보증금 1800만원 / 월 26만원", "area": "33.1㎡"},
+            {"name": "경기 안양시 동안 행복주택", "location": "경기도 안양시 동안구 관악대로 312 (호계동)", "deposit": "보증금 1500만원 / 월 21만원", "area": "28.9㎡"},
+            {"name": "부산 해운대구 국민임대", "location": "부산광역시 해운대구 해운대로 620 (좌동)", "deposit": "보증금 1600만원 / 월 25만원", "area": "32.4㎡"},
+            {"name": "부산 사하구 행복주택", "location": "부산광역시 사하구 낙동대로 290 (당리동)", "deposit": "보증금 1400만원 / 월 22만원", "area": "30.7㎡"},
+            {"name": "부산 동래구 청년임대", "location": "부산광역시 동래구 중앙대로 1267 (온천동)", "deposit": "보증금 900만원 / 월 18만원", "area": "29.0㎡"},
+            {"name": "부산 북구 국민임대", "location": "부산광역시 북구 금곡대로 202 (금곡동)", "deposit": "보증금 1700만원 / 월 24만원", "area": "31.2㎡"},
+            {"name": "부산 수영구 행복주택", "location": "부산광역시 수영구 광안해변로 150 (광안동)", "deposit": "보증금 2000만원 / 월 27만원", "area": "33.3㎡"},
+            {"name": "대구 수성구 행복주택", "location": "대구광역시 수성구 달구벌대로 2480 (범어동)", "deposit": "보증금 1500만원 / 월 23만원", "area": "30.2㎡"},
+            {"name": "대구 달서구 국민임대", "location": "대구광역시 달서구 월배로 250 (상인동)", "deposit": "보증금 1200만원 / 월 19만원", "area": "29.5㎡"},
+            {"name": "대구 북구 청년임대", "location": "대구광역시 북구 칠곡중앙대로 180 (구암동)", "deposit": "보증금 800만원 / 월 17만원", "area": "28.1㎡"},
+            {"name": "대구 동구 행복주택", "location": "대구광역시 동구 아양로 75 (신암동)", "deposit": "보증금 1300만원 / 월 21만원", "area": "31.0㎡"},
+            {"name": "대구 중구 매입임대", "location": "대구광역시 중구 달성로 136 (대신동)", "deposit": "보증금 900만원 / 월 18만원", "area": "28.7㎡"},
+            {"name": "인천 서구 검단 행복주택", "location": "인천광역시 서구 불로로 160 (불로동)", "deposit": "보증금 2000만원 / 월 25만원", "area": "32.8㎡"},
+            {"name": "인천 남동구 청년전세임대", "location": "인천광역시 남동구 인주대로 620 (구월동)", "deposit": "보증금 1000만원 / 월 16만원", "area": "29.2㎡"},
+            {"name": "인천 부평구 국민임대", "location": "인천광역시 부평구 경원대로 1120 (십정동)", "deposit": "보증금 1800만원 / 월 23만원", "area": "31.6㎡"},
+            {"name": "인천 중구 행복주택", "location": "인천광역시 중구 제물량로 250 (신흥동)", "deposit": "보증금 1500만원 / 월 20만원", "area": "30.4㎡"},
+            {"name": "광주 북구 행복주택", "location": "광주광역시 북구 하서로 120 (매곡동)", "deposit": "보증금 1300만원 / 월 22만원", "area": "31.1㎡"},
+            {"name": "광주 남구 국민임대", "location": "광주광역시 남구 서문대로 105 (진월동)", "deposit": "보증금 1100만원 / 월 19만원", "area": "30.3㎡"},
+            {"name": "광주 서구 청년임대", "location": "광주광역시 서구 상무대로 950 (화정동)", "deposit": "보증금 900만원 / 월 17만원", "area": "28.4㎡"},
+            {"name": "광주 동구 행복주택", "location": "광주광역시 동구 중앙로 180 (대인동)", "deposit": "보증금 1200만원 / 월 20만원", "area": "29.8㎡"},
+            {"name": "광주 광산구 국민임대", "location": "광주광역시 광산구 하남대로 280 (신가동)", "deposit": "보증금 1400만원 / 월 23만원", "area": "32.0㎡"},
+            {"name": "대전 서구 행복주택", "location": "대전광역시 서구 둔산로 102 (둔산동)", "deposit": "보증금 1800만원 / 월 24만원", "area": "31.8㎡"},
+            {"name": "대전 유성구 국민임대", "location": "대전광역시 유성구 대학로 91 (궁동)", "deposit": "보증금 1500만원 / 월 21만원", "area": "30.5㎡"},
+            {"name": "대전 동구 청년임대", "location": "대전광역시 동구 동서대로 1650 (용전동)", "deposit": "보증금 1000만원 / 월 18만원", "area": "28.7㎡"},
+            {"name": "대전 중구 행복주택", "location": "대전광역시 중구 중앙로 130 (문화동)", "deposit": "보증금 1300만원 / 월 20만원", "area": "30.1㎡"},
+            {"name": "대전 대덕구 국민임대", "location": "대전광역시 대덕구 한밭대로 1098 (오정동)", "deposit": "보증금 1200만원 / 월 19만원", "area": "29.4㎡"},
+            {"name": "세종시 아름 행복주택", "location": "세종특별자치시 한누리대로 312 (어진동)", "deposit": "보증금 2000만원 / 월 26만원", "area": "32.6㎡"},
+            {"name": "강원 춘천시 국민임대", "location": "강원특별자치도 춘천시 공지로 250 (효자동)", "deposit": "보증금 1100만원 / 월 18만원", "area": "29.9㎡"},
+            {"name": "강원 원주시 행복주택", "location": "강원특별자치도 원주시 시청로 50 (무실동)", "deposit": "보증금 1500만원 / 월 21만원", "area": "31.7㎡"},
+            {"name": "강원 강릉시 청년임대", "location": "강원특별자치도 강릉시 강릉대로 230 (교동)", "deposit": "보증금 800만원 / 월 17만원", "area": "28.6㎡"},
+            {"name": "제주 제주시 국민임대", "location": "제주특별자치도 제주시 중앙로 210 (이도이동)", "deposit": "보증금 1600만원 / 월 23만원", "area": "30.9㎡"},
+            {"name": "제주 서귀포시 행복주택", "location": "제주특별자치도 서귀포시 중앙로 70 (서귀동)", "deposit": "보증금 1400만원 / 월 21만원", "area": "30.2㎡"},
+            {"name": "울산 남구 국민임대", "location": "울산광역시 남구 삼산로 200 (삼산동)", "deposit": "보증금 1300만원 / 월 20만원", "area": "30.0㎡"},
+            {"name": "울산 북구 행복주택", "location": "울산광역시 북구 산업로 1200 (화봉동)", "deposit": "보증금 1100만원 / 월 19만원", "area": "29.3㎡"},
+            {"name": "충북 청주시 국민임대", "location": "충청북도 청주시 상당구 상당로 150 (남문로)", "deposit": "보증금 1500만원 / 월 22만원", "area": "31.0㎡"},
+            {"name": "전북 전주시 행복주택", "location": "전라북도 전주시 완산구 팔달로 250 (중앙동)", "deposit": "보증금 1400만원 / 월 20만원", "area": "30.4㎡"},
+            {"name": "경남 창원시 청년임대", "location": "경상남도 창원시 의창구 원이대로 450 (용호동)", "deposit": "보증금 1000만원 / 월 17만원", "area": "29.8㎡"},
+            {"name": "경북 포항시 행복주택", "location": "경상북도 포항시 북구 중흥로 100 (두호동)", "deposit": "보증금 1300만원 / 월 20만원", "area": "30.8㎡"},
+            {"name": "경북 구미시 국민임대", "location": "경상북도 구미시 송동로 180 (도량동)", "deposit": "보증금 1100만원 / 월 18만원", "area": "29.6㎡"}
         ]
+        def kakao_geocode(address: str):
+            url = "https://dapi.kakao.com/v2/local/search/address.json"
+            headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
+            params = {"query": address}
+            res = requests.get(url, headers=headers, params=params, timeout=5)
 
+            # 상태코드가 200이 아니면 왜 그런지 보자
+            if res.status_code != 200:
+                print(f"[ERROR {res.status_code}] {address} -> {res.text}")
+                return None, None
+
+            data = res.json()
+            docs = data.get("documents", [])
+            if not docs:
+                print(f"[NO_MATCH] {address}")
+                return None, None
+
+            lat = float(docs[0]["y"])
+            lon = float(docs[0]["x"])
+            return lat, lon
+            
         # ---- 페이지네이션 (공고 리스트 아래) ----
         items_per_page = 5  
         if "page_num" not in st.session_state:
@@ -710,7 +744,7 @@ elif page == "search":
                         <div class="listing-text">
                             <div class="listing-title">{item['name']}</div>
                             <div class="listing-sub">📍 {item['location']}</div>
-                            <div class="listing-sub">💰 {item['price']}</div>
+                            <div class="listing-sub">💰 {item['deposit']}</div>
                         </div>
                         <img src="{image_src}" class="listing-img">
                     </div>
@@ -785,56 +819,9 @@ elif page == "search":
 
         region_counts = {key: 0 for key in region_coords.keys()}
 
-        for item in listings:
-            loc = item["location"]
-            if "서울" in loc: region_counts["서울"] += 1
-            elif "경기" in loc: region_counts["경기"] += 1
-            elif "인천" in loc: region_counts["인천"] += 1
-            # ... (나머지 지역 카운팅 로직 유지)
-            elif "강원" in loc: region_counts["강원"] += 1
-            elif "충북" in loc: region_counts["충북"] += 1
-            elif "충남" in loc: region_counts["충남"] += 1
-            elif "대전" in loc: region_counts["대전"] += 1
-            elif "세종" in loc: region_counts["세종"] += 1
-            elif "전북" in loc: region_counts["전북"] += 1
-            elif "전남" in loc or "전라남" in loc: region_counts["전남"] += 1
-            elif "광주" in loc: region_counts["광주"] += 1
-            elif "경북" in loc or ("경상북" in loc): region_counts["경북"] += 1
-            elif "경남" in loc or ("경상남" in loc): region_counts["경남"] += 1
-            elif "부산" in loc: region_counts["부산"] += 1
-            elif "대구" in loc: region_counts["대구"] += 1
-            elif "울산" in loc: region_counts["울산"] += 1
-            elif "제주" in loc: region_counts["제주"] += 1
-            
         # folium 지도 생성
         m = folium.Map(location=[36.5, 127.8], zoom_start=7)
-        js_global_toggle = """
-        function toggleIndividualMarkers(currentZoom) {
-            // 개별 마커 (클래스 이름: individual-listing-marker)를 선택
-            var individualMarkers = document.querySelectorAll('.individual-listing-marker');
-            
-            // Zoom 13 이상일 때만 개별 마커를 표시
-            individualMarkers.forEach(function(marker) {
-                if (currentZoom >= 13) {
-                    marker.style.display = 'block'; 
-                } else {
-                    marker.style.display = 'none'; 
-                }
-            });
-        }
 
-        // 지도의 'zoomend' 이벤트에 리스너를 추가하여 확대/축소 시마다 개별 마커를 제어
-        map.on('zoomend', function() {
-            toggleIndividualMarkers(map.getZoom());
-        });
-
-        // 페이지 로드 후 한 번 실행하여 초기 상태 설정
-        setTimeout(function() {
-            toggleIndividualMarkers(map.getZoom());
-        }, 500);
-        """
-
-        m.get_root().html.add_child(folium.Element(f'<script>{js_global_toggle}</script>'))
         def create_custom_icon(region_name, count, lat, lon):
             if count == 0:
                 header_bg_color = "#1E90FF"
@@ -844,16 +831,23 @@ elif page == "search":
                 count_text_color = "#e91e63"
 
             js_action = f"""
-                map.flyTo([{lat}, {lon}], 13); 
-                this.style.visibility='hidden'; 
-                map.on('zoomend', function() {{
-                    if (map.getZoom() < 12) {{
-                        document.querySelectorAll('div[onclick]').forEach(el => el.style.visibility='visible');
-                    }}
+                if (typeof map !== 'undefined') {{
+                    // 그 위치로 줌
+                    map.flyTo([{lat}, {lon}], 13);
+                }}
+
+                // 개별 공고 말풍선 보이게
+                document.querySelectorAll('.individual-listing-marker').forEach(function(el) {{
+                    el.style.display = 'block';
+                    el.style.opacity = '1';
                 }});
+
+                // 이 지역박스는 클릭하면 잠깐 숨김
+                this.style.display = 'none';
             """
+
             css_style = f"""
-                <div onclick="{js_action}" style="
+                <div class="region-marker" onclick="{js_action}" style="
                     width: 60px;
                     height: 70px;
                     background-color: white;
@@ -863,8 +857,8 @@ elif page == "search":
                     flex-direction: column;
                     overflow: hidden;
                     cursor: pointer;
-                    position: relative;              /* 추가 */
-                    z-index: {count + 100}; 
+                    position: relative;
+                    z-index: {count + 100};
                 ">
                     <div style="
                         background-color: {header_bg_color};
@@ -873,9 +867,7 @@ elif page == "search":
                         padding: 4px 0;
                         text-align: center;
                         font-size: 12px;
-                    ">
-                        {region_name}
-                    </div>
+                    ">{region_name}</div>
                     <div style="
                         padding: 4px 0;
                         text-align: center;
@@ -894,7 +886,25 @@ elif page == "search":
                 html=css_style,
                 icon_anchor=(30, 70) 
             )
-        
+        for item in listings:
+            loc = item["location"]
+            if "서울" in loc: region_counts["서울"] += 1
+            elif "경기" in loc: region_counts["경기"] += 1
+            elif "인천" in loc: region_counts["인천"] += 1
+            elif "강원" in loc: region_counts["강원"] += 1
+            elif "충북" in loc: region_counts["충북"] += 1
+            elif "충남" in loc: region_counts["충남"] += 1
+            elif "대전" in loc: region_counts["대전"] += 1
+            elif "세종" in loc: region_counts["세종"] += 1
+            elif "전북" in loc: region_counts["전북"] += 1
+            elif "전남" in loc or "전라남" in loc: region_counts["전남"] += 1
+            elif "광주" in loc: region_counts["광주"] += 1
+            elif "경북" in loc or ("경상북" in loc): region_counts["경북"] += 1
+            elif "경남" in loc or ("경상남" in loc): region_counts["경남"] += 1
+            elif "부산" in loc: region_counts["부산"] += 1
+            elif "대구" in loc: region_counts["대구"] += 1
+            elif "울산" in loc: region_counts["울산"] += 1
+            elif "제주" in loc: region_counts["제주"] += 1
         for region_name, count in sorted(region_counts.items(), key=lambda x: x[1]):
             if region_name in region_coords:
                 lat, lon = region_coords[region_name]
@@ -904,51 +914,140 @@ elif page == "search":
                     icon=region_icon,
                     z_index_offset=count*1000
                 ).add_to(m)
-        for item in listings:
-            # lat, lon 데이터가 있는 항목만 마커를 생성합니다. (1번의 데이터 수정 필수)
-            if 'lat' in item and 'lon' in item:
-                # 요청하신 이미지 형태의 HTML 팝업 스타일
-                popup_html = f"""
-                <div class="individual-listing-marker">
-                <div style="
-                    background-color: rgba(255,255,255,0.98);
-                    border: 1px solid #333; /* 검정색 테두리 */
-                    border-radius: 4px;
-                    padding: 8px 12px;
-                    font-family: 'Malgun Gothic', sans-serif;
-                    text-align: center;
-                    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-                    width: 110px; /* 너비 확장 */
-                    white-space: nowrap;
-                ">
-                    <b style="
-                        background-color: #333; 
-                        color: white; 
-                        padding: 2px 5px; 
-                        border-radius: 3px; 
-                        font-size: 11px;
-                        display: block; /* 블록 요소로 만들어 팝업 폭 전체를 채웁니다 */
-                        margin: -8px -12px 6px -12px; /* 팝업의 패딩을 침범하도록 마진 설정 */
-                    ">{item['name'].split()[2]}</b>
-                    
-                    <span style="font-size: 13px; color: #444;">{item['area']}</span><br>
-                    <span style="color:#007bff; font-weight:700; font-size: 15px;">{item['deposit']}</span>
-                </div>
-                </div>
-                """
-                # DivIcon을 사용하여 HTML을 마커 아이콘으로 사용
-                icon = folium.DivIcon(
-                    html=popup_html,
-                    # 아이콘의 기준점 조정 (팝업이 마커의 하단 중앙에 위치하도록)
-                    icon_anchor=(55, 60) 
-                )
                 
-                # 지도에 마커 추가
-                folium.Marker(
-                    location=[item['lat'], item['lon']],
-                    icon=icon,
-                    tooltip=item['name'] # 마우스를 올렸을 때 이름 표시
-                ).add_to(m)
+        for item in listings:
+            # 1) 리스트에 이미 lat/lon이 들어있으면 그걸 쓰고
+            lat = item.get("lat")
+            lon = item.get("lon")
+
+            # 2) 없으면 주소로 카카오 호출해서 채워넣기
+            if not lat or not lon:
+                addr = item.get("location")
+                if not addr:
+                    continue
+                lat, lon = kakao_geocode(addr)  # ⬅️ 위쪽에 이미 정의해둔 함수 그대로 사용
+                if not lat or not lon:
+                    # 이 공고는 좌표가 안 나왔으니까 그냥 건너뛴다
+                    continue
+                # 성공했으면 item에 저장해두면 다음 rerun 때 또 안 부름
+                item["lat"] = lat
+                item["lon"] = lon
+                time.sleep(0.25)  # 카카오가 너무 빠르게 많이 부르면 429 나올 수 있어서 살짝 쉬기
+
+            # 3) 이제 지도에 찍기
+            popup_html = f"""
+            <div class="individual-listing-marker" style="
+                position: relative;
+                display: inline-block;
+                background: #fff;
+                backdrop-filter: blur(2px);
+                color: #333;
+                border: 1.3px solid #000;                  
+                border-radius: 6px;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.25, 0.88);
+                font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+                font-size: 12px;
+                line-height: 1.4;
+                text-align: center;
+                overflow: hidden;
+                width: 95px;
+                opacity: 0.6;
+            ">
+                <!-- 상단 검정 헤더 -->
+                <div style="
+                    background: rgba(0,0,0);
+                    color: #fff;
+                    font-weight: 700;
+                    padding: 3px 0 4px 0;
+                    font-size: 12px;
+                ">
+                    {'국민 LH'}
+                </div>
+
+                <!-- 흰색 본체 -->
+                <div style="padding: 5px 6px 6px 6px;">
+                    <div style="font-weight: 500;">{item.get('area', '—')}</div>
+                    <div style="color: #000; font-weight: 600;">
+                        {item.get('deposit', '—')}
+                    </div>
+                </div>
+
+                <!-- 꼬리 -->
+                <div style="
+                    position: absolute;
+                    bottom: -6px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    width: 0;
+                    height: 0;
+                    border-left: 6px solid transparent;
+                    border-right: 6px solid transparent;
+                    border-top: 6px solid #fff;
+                "></div>
+            </div>
+            """
+            folium.Marker(
+                location=[lat, lon],
+                icon=folium.DivIcon(html=popup_html)
+            ).add_to(m)
+
+        # folium 내부 JS 삽입을 위한 클래스 정의
+        from folium import MacroElement
+        from jinja2 import Template
+
+        class ToggleMarkers(MacroElement):
+            _template = Template("""
+            {% macro script(this, kwargs) %}
+            // folium이 실제로 만든 지도 객체 이름을 가져옴
+            var map = {{ this._parent.get_name() }};
+
+            function applyZoomVisibility() {
+                var zoom = map.getZoom();
+                var regionMarkers = document.querySelectorAll('.region-marker');
+                var detailMarkers = document.querySelectorAll('.individual-listing-marker');
+
+                if (zoom >= 12) {
+                    regionMarkers.forEach(el => el.style.display = 'none');
+                    detailMarkers.forEach(el => el.style.display = 'block');
+                } else {
+                    regionMarkers.forEach(el => el.style.display = 'block');
+                    detailMarkers.forEach(el => el.style.display = 'none');
+                }
+            }
+
+            // 처음 로드됐을 때 한 번
+            map.whenReady(function() {
+                applyZoomVisibility();
+
+                // 여기서 region-marker 들에 클릭이벤트를 붙인다
+                document.querySelectorAll('.region-marker').forEach(function(el) {
+                    el.addEventListener('click', function() {
+                        var lat = parseFloat(el.getAttribute('data-lat'));
+                        var lon = parseFloat(el.getAttribute('data-lon'));
+
+                        // 지도 이동
+                        map.flyTo([lat, lon], 13);
+
+                        // 개별 공고 보이게
+                        document.querySelectorAll('.individual-listing-marker').forEach(function(d) {
+                            d.style.display = 'block';
+                            d.style.opacity = '1';
+                        });
+
+                        // 이 지역마커는 숨겨도 되고
+                        // el.style.display = 'none';
+                    });
+                });
+            });
+
+            // 줌 바뀔 때마다 표시 전환
+            map.on('zoomend', applyZoomVisibility);
+            {% endmacro %}
+            """)
+
+        # ✅ folium 지도에 위 JS 추가
+        m.get_root().add_child(ToggleMarkers())
+
         map_event = st_folium(m, width="100%", height=845)
         new_click = None
         if map_event:
@@ -993,7 +1092,7 @@ elif page == "search":
                         </div>
                         <div class="section-row">
                             <span class="section-label">임대조건</span>
-                            <span class="section-value">{selected['price']}</span>
+                            <span class="section-value">{selected['deposit']}</span>
                         </div>
                     </div>
                     <div class="section-title" style="margin-top:14px;">모집단지</div>
