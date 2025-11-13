@@ -6,8 +6,13 @@ import os
 from folium import Element
 import time
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 KAKAO_API_KEY = "102d0b0b719c47186ef3afa94f03e00d"  # 예: "46c0a0f1e9f1a0...."
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+
 def kakao_geocode(address: str):
     """카카오 주소검색으로 lat, lon 반환"""
     url = "https://dapi.kakao.com/v2/local/search/address.json"
@@ -249,12 +254,16 @@ if page == "home":
             {"role": "assistant", "content": "안녕하세요😊 당신의 집 요청 집착이에요! 🧚‍♀️<br> 원하시는 공공임대 공고를 ‘착’하고 불러와드릴게요 🏡<br>지역 / 예산 / 주택유형 아무거나 적어보세요 💬"}
         ]
 
-    # Chat Input은 리스트 출력 전에 위치해야 합니다.
-    if query := st.chat_input("질문을 입력하세요."):
-        st.session_state.messages.append({"role": "user", "content": query})
-        # 여기에 실제 LLM 로직이 들어갈 예정입니다.
-        response = f"안녕하세요! 집집이예요 🏠  \n보증금 2,000만원 이하의 행복주택 공고를 찾아드릴게요.  \n\n현재 모집 중인 **2025년 2차 청년안심주택(공공임대)** 공고에서 청년계층을 대상으로 **시세 30~50% 수준의 임대조건**을 제공하는 주택이 있습니다.  \n행복주택과 유사한 공공임대주택으로, 보증금 2,000만원 이하 조건에 부합하는 단지가 있을 수 있어요.  \n\n### 추천 공고 정보  \n**✅ 2025년 2차 청년안심주택(공공임대)**  \n- **대상**: 만 19~39세 무주택 청년  \n- **임대조건**: 시중 시세의 30~50% (순위에 따라 차등 적용)  \n- **보증금 예시**:  \n  - 시세 1억원 주택 → 보증금 약 **3,000~5,000만원** (단, 일부 단지는 보증금 지원 혜택 적용 가능)  \n- **신청기간**: 2025.08.11 ~ 08.13  \n- **입주예정**: 2026.01.30 ~ 03.03  \n\n### 보증금 2,000만원 이하 주택 찾기 팁  \n1. **지역별 주거안심종합센터**에 문의하시면 보증금 지원 프로그램(예: 청년전용 임대보증금 대출)을 안내받을 수 있어요.  \n   - 예: 강남센터 (02-2086-9800), 마포센터 (02-380-0100) 등  \n2. **행복주택**의 경우, 보증금 조건은 단지별로 상이하므로 [SH공사 홈페이지](https://www.i-sh.co.kr)에서 \"행복주택\"으로 검색해보세요.  \n\n### 추가 안내  \n- 현재 공고에는 정확한 보증금 금액이 명시되지 않았으나, **청년안심주택은 시세 대비 30~50% 할인**되므로 저렴한 단지를 찾을 수 있을 거예요.  \n- 신청 전 반드시 **공고문의 \"임대조건\" 항목**을 확인하시거나, 해당 지역 센터에 문의해 주세요!  \n\n📋 **출처**: 2025년 2차 청년안심주택 입주자 모집공고 (2025-07-30)  \n\n더 자세한 조건이 있으시면 언제든 알려주세요! 😊"
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    # 세션 ID 초기화
+    if 'session_id' not in st.session_state:
+        import uuid
+        st.session_state.session_id = f"user_{uuid.uuid4().hex[:8]}"
+    
+    # 로딩 상태 초기화
+    if 'is_loading' not in st.session_state:
+        st.session_state.is_loading = False
+    if 'pending_query' not in st.session_state:
+        st.session_state.pending_query = None
     
     # 메시지 표시
     for i, message in enumerate(st.session_state.messages):
@@ -293,6 +302,101 @@ if page == "home":
                 """,
                 unsafe_allow_html=True
             )
+
+    # API 호출 처리 (로딩 상태일 때만)
+    if st.session_state.is_loading and st.session_state.pending_query:
+        # 스트리밍 응답을 위한 placeholder
+        response_placeholder = st.empty()
+        
+        try:
+            api_url = f"{BACKEND_API_URL}/chat/stream"
+            payload = {
+                "content": st.session_state.pending_query,
+                "session_id": st.session_state.session_id
+            }
+            
+            # 스트리밍 요청
+            with requests.post(api_url, json=payload, stream=True, timeout=60) as response:
+                if response.status_code == 200:
+                    full_response = ""
+                    
+                    # 스트리밍 데이터 수신
+                    for line in response.iter_lines():
+                        if line:
+                            try:
+                                # JSON 파싱
+                                line_text = line.decode('utf-8').strip()
+                                
+                                # SSE 형식: "data: " 접두사 제거
+                                if line_text.startswith('data: '):
+                                    line_text = line_text[6:]  # "data: " 제거
+                                
+                                # [DONE] 신호 무시
+                                if line_text == '[DONE]':
+                                    continue
+                                
+                                # JSON 객체 파싱
+                                data = requests.compat.json.loads(line_text)
+                                
+                                # type이 "content"인 경우만 처리
+                                if data.get('type') == 'content':
+                                    chunk = data.get('data', '')
+                                    
+                                    if chunk:
+                                        full_response += chunk
+                                        # 실시간으로 화면에 표시
+                                        response_placeholder.markdown(
+                                            f"""
+                                            <div style="display:flex; justify-content:flex-start; margin-top:10px; margin-bottom:20px;">
+                                                <div style="
+                                                    background-color:#F0F0F0;
+                                                    padding:20px;
+                                                    border-radius:15px;
+                                                    max-width:60%;
+                                                    word-wrap:break-word;
+                                                ">
+                                                    {full_response}
+                                                </div>
+                                            </div>
+                                            """,
+                                            unsafe_allow_html=True
+                                        )
+                            except Exception as e:
+                                # 빈 줄이나 파싱 불가능한 줄은 무시
+                                continue
+                    
+                    # 최종 응답 저장
+                    assistant_response = full_response if full_response else "응답을 받지 못했습니다."
+                else:
+                    assistant_response = f"오류가 발생했습니다. (상태 코드: {response.status_code})"
+        except requests.exceptions.ConnectionError:
+            assistant_response = "⚠️ 서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인해주세요."
+        except requests.exceptions.Timeout:
+            assistant_response = "⚠️ 요청 시간이 초과되었습니다. 다시 시도해주세요."
+        except Exception as e:
+            assistant_response = f"⚠️ 오류가 발생했습니다: {str(e)}"
+        
+        # 로딩 메시지를 실제 응답으로 교체
+        st.session_state.messages[-1] = {"role": "assistant", "content": assistant_response}
+        st.session_state.is_loading = False
+        st.session_state.pending_query = None
+        st.rerun()
+
+    # Chat Input
+    user_input = st.chat_input("질문을 입력하세요.")
+    
+    # 사용자 입력 처리
+    if user_input:
+        # 1. 사용자 메시지를 즉시 추가
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        
+        # 2. 로딩 메시지 추가
+        st.session_state.messages.append({"role": "assistant", "content": "💭 답변 생성 중..."})
+        st.session_state.is_loading = True
+        st.session_state.pending_query = user_input
+        
+        # 3. 화면 즉시 갱신
+        st.rerun()
 
 elif page == "search":
     # (스타일링 유지)
