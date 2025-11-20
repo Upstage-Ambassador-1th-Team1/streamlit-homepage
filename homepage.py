@@ -7,26 +7,266 @@ from folium import Element
 import time
 import requests
 from dotenv import load_dotenv
+import textwrap
 
 load_dotenv()
 
 KAKAO_API_KEY = "102d0b0b719c47186ef3afa94f03e00d"  # 예: "46c0a0f1e9f1a0...."
-BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+CHAT_BACKEND_URL = os.getenv("CHAT_BACKEND_URL", "http://localhost:8000")
+HOUSING_API_URL = "http://127.0.0.1:8000"
+import re
 
+def extract_short_rent(text):
+    """
+    '임대기간 ~ 가능'까지만 잘라주는 함수
+    """
+    if not text:
+        return "임대조건 정보 없음"
+
+    # 1) '임대기간'으로 시작하는 문장 찾기
+    m = re.search(r"(임대기간[^.]+가능)", text)
+    if m:
+        return m.group(1).strip()
+
+    # 2) 못 찾으면 첫 40자만
+    return text[:40] + "…"
+def format_date(date_str: str) -> str:
+    """
+    '2025-09-30' -> '2025.09.30' 형태로 바꿔줌
+    """
+    if not date_str:
+        return ""
+    if len(date_str) == 10 and date_str[4] == "-" and date_str[7] == "-":
+        return date_str.replace("-", ".")
+    return date_str
+def extract_region_from_address(addr: str):
+    if not addr:
+        return None
+
+    addr = addr.strip()
+
+    # 서울
+    if addr.startswith("서울"):
+        # '서울', '서울특별시', '서울시' 모두 포함
+        return "서울"
+
+    # 경기
+    if addr.startswith("경기") or addr.startswith("경기도"):
+        return "경기"
+
+    # 부산
+    if addr.startswith("부산") or addr.startswith("부산광역시"):
+        return "부산"
+
+    # 대구
+    if addr.startswith("대구") or addr.startswith("대구광역시"):
+        return "대구"
+
+    # 필요하면 인천, 광주 등 추가
+    return None
+def fetch_listings_from_backend(
+    skip: int = 0,
+    limit: int = 50,
+    *,
+    location: str | None = None,
+    subscription_types: list[str] | None = None,
+    min_deposit: int | None = None,
+    max_deposit: int | None = None,
+    min_rent: int | None = None,
+    max_rent: int | None = None,
+    min_area: float | None = None,
+    max_area: float | None = None,
+    unit_types: list[str] | None = None,
+):
+    try:
+        payload = {
+            "location": location,                          # None이면 전체
+            "subscription_types": subscription_types or [],# []이면 전체
+            "min_deposit": min_deposit or 0,              # 0이면 필터 없음으로 처리한다고 가정
+            "max_deposit": max_deposit or 0,
+            "min_rent": min_rent or 0,
+            "max_rent": max_rent or 0,
+            "min_area": min_area or 0,
+            "max_area": max_area or 0,
+            "unit_types": unit_types or [],
+            "skip": skip,
+            "limit": limit,
+            "sort_by": "created_at",
+            "sort_order": "desc",
+        }
+
+        resp = requests.post(
+            f"{HOUSING_API_URL}/api/v1/search",
+            json=payload,
+            timeout=100,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        raw_listings = []
+
+        for ann in data.get("items", []):
+            prog = ann.get("program_info") or {}
+            company_type = ann.get("company_type") or ""
+            subscription_type = ann.get("subscription_type") or ""
+            raw_notice_date = ann.get("published_date") or ann.get("announcement_date") or ""
+            notice_date = format_date(raw_notice_date)
+            eligibility_summary = (prog.get("eligibility_summary") or "").strip()
+            timeline = prog.get("timeline_steps") or []
+            application_period = ""
+            for step in timeline:
+                step_name = step.get("step_name", "")
+                if "신청접수" in step_name:
+                    application_period = step.get("period", "")
+                    break
+
+            financial_summary = (prog.get("financial_terms_summary") or "").strip()
+            link = ann.get("link") or ""
+            department = ann.get("department") or ""
+
+            # 백엔드 스펙: supply_projects 안에 실제 세대/단지 정보가 들어간다고 가정
+            units = prog.get("supply_units") or prog.get("supply_projects") or []
+
+            for u in units:
+                deposit_text = (u.get("deposit_and_rent_text") or "").strip()
+                depo = u.get("deposit_amount_krw") or 0
+                rent = u.get("monthly_rent_krw") or 0
+                area_m2 = u.get("exclusive_area_m2")
+
+                if not deposit_text:
+                    if depo or rent:
+                        depo_txt = f"{depo:,}원" if depo else "0원"
+                        rent_txt = f"{rent:,}원" if rent else "0원"
+                        deposit_text = f"보증금 {depo_txt} / 월 {rent_txt}"
+                    elif financial_summary:
+                        deposit_text = financial_summary
+                    else:
+                        deposit_text = "임대조건: 공고문 참고"
+
+                complex_name = u.get("location_label") or ""
+                addr_full = u.get("location_full_address") or ""
+                raw_listings.append(
+                    {
+                        "id": u.get("id") or ann.get("id"),
+                        "name": ann.get("title"),
+                        "complex": complex_name,
+                        "location": u.get("location_full_address") or "",
+                        "region": extract_region_from_address(addr_full), 
+                        "deposit": deposit_text,
+                        "deposit_short": extract_short_rent(deposit_text),
+                        "area": (
+                            f"{area_m2}㎡"
+                            if area_m2
+                            else "-"
+                        ),
+                        "notice_date": notice_date,
+                        "application_period": application_period,
+                        "company_type": company_type,
+                        "subscription_type": subscription_type,
+                        "eligibility_summary": eligibility_summary,
+                        "timeline_steps": timeline,
+                        "link": link,
+                        "department": department,
+
+                        # 숫자 필터용 값들도 같이 들고 있기
+                        "area_m2": area_m2,
+                        "deposit_amount_krw": depo,
+                        "monthly_rent_krw": rent,
+                    }
+                )
+
+        # 🔹 중복 제거 (이름 + 주소 기준)
+        dedup = {}
+        for item in raw_listings:
+            key = (item["name"], item["location"])
+            if key in dedup:
+                old = dedup[key]
+                if (
+                    old["deposit"].startswith("임대조건: 공고문 참고")
+                    and item["deposit"] != old["deposit"]
+                ):
+                    dedup[key] = item
+            else:
+                dedup[key] = item
+
+        listings = list(dedup.values())
+        sub_types = sorted({ (item.get("subscription_type") or "") for item in listings })
+        companies = sorted({ (item.get("company_type") or "") for item in listings })
+        print("[DEBUG] subscription_type 리스트:", sub_types)
+        print("[DEBUG] company_type 리스트:", companies)
+        print(
+            f"[DEBUG] fetched {len(raw_listings)} raw listings "
+            f"→ {len(listings)} unique listings from backend"
+        )
+
+        return listings
+
+    except Exception as e:
+        st.error(f"백엔드에서 공고를 가져오는 중 오류가 발생했습니다: {e}")
+        return []
+
+def fetch_map_points_from_backend():
+    """
+    지도용 좌표를 /api/v1/map/points 에서 가져온다.
+    """
+    try:
+        resp = requests.get(
+            f"{HOUSING_API_URL}/api/v1/map/points",
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        points = data.get("points", []) or []
+
+        # 주소 → 포인트 dict 으로 정리해두면 나중에 찾기 편해
+        addr_to_point = {}
+        for p in points:
+            addr = (p.get("location_full_address") or "").strip()
+            lat = p.get("latitude")
+            lon = p.get("longitude")
+            if not addr or lat is None or lon is None:
+                continue
+
+            addr_to_point[addr] = {
+                "lat": lat,
+                "lon": lon,
+                "location_label": p.get("location_label"),
+                "title": p.get("title"),
+                "subscription_type": p.get("subscription_type"),
+                "exclusive_area_m2": p.get("exclusive_area_m2"),
+                "deposit_amount_krw": p.get("deposit_amount_krw"),
+                "monthly_rent_krw": p.get("monthly_rent_krw"),
+                "announcement_id": p.get("announcement_id"),
+                "id": p.get("id"),
+            }
+
+        print(f"[MAP] fetched {len(points)} map points from backend")
+        return addr_to_point
+
+    except Exception as e:
+        print(f"[MAP] failed to fetch map points: {e}")
+        return {}    
 def kakao_geocode(address: str):
     """카카오 주소검색으로 lat, lon 반환"""
     url = "https://dapi.kakao.com/v2/local/search/address.json"
     headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
     params = {"query": address}
-    res = requests.get(url, headers=headers, params=params, timeout=5)
-    if res.status_code == 200:
-        data = res.json()
-        docs = data.get("documents")
-        if docs:
-            lat = float(docs[0]["y"])  # 위도
-            lon = float(docs[0]["x"])  # 경도
-            return lat, lon
-    return None, None
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=5)
+        res.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        # ✅ 여기서 한 번만 로그 찍고, 앱은 죽지 않도록
+        print(f"[KAKAO GEOCODE ERROR] {address}: {e}")
+        return None, None
+
+    data = res.json()
+    docs = data.get("documents", [])
+    if not docs:
+        return None, None
+
+    first = docs[0]
+    return float(first["y"]), float(first["x"])
 
 st.set_page_config(page_title="홈 페이지", layout="wide")
 
@@ -309,7 +549,7 @@ if page == "home":
         response_placeholder = st.empty()
         
         try:
-            api_url = f"{BACKEND_API_URL}/chat/stream"
+            api_url = f"{CHAT_BACKEND_URL}/chat/stream"
             payload = {
                 "content": st.session_state.pending_query,
                 "session_id": st.session_state.session_id
@@ -564,6 +804,7 @@ elif page == "search":
         if "applied_price" not in st.session_state: st.session_state.applied_price = None 
         if "area_slider" not in st.session_state: st.session_state.area_slider = (0, 150)   # 주택 면적(㎡)
         if "applied_area" not in st.session_state: st.session_state.applied_area = None
+        if "company_filter" not in st.session_state: st.session_state.company_filter = "전체"
         if "selected_listing" not in st.session_state: st.session_state.selected_listing = None
         if "detail_tab" not in st.session_state:
             st.session_state.detail_tab = "content"
@@ -573,6 +814,14 @@ elif page == "search":
             st.session_state.selected_region = None
         if "allowDetailMarkers" not in st.session_state:
             st.session_state.allowDetailMarkers = False
+        if "applied_house_type" not in st.session_state: 
+            st.session_state.applied_house_type = "전체"
+        if "applied_company" not in st.session_state:
+            st.session_state.applied_company = "전체"
+        if "applied_location" not in st.session_state: 
+            st.session_state.applied_location = "전체"
+        if "last_search_keyword" not in st.session_state:
+            st.session_state.last_search_keyword = ""
 
         with col_input:
             st.markdown('<div style="height:4px;"></div>', unsafe_allow_html=True)
@@ -584,6 +833,10 @@ elif page == "search":
                 key="search_input"
             )
             st.session_state.search_text = keyword
+            if keyword != st.session_state.last_search_keyword:
+                st.session_state.last_search_keyword = keyword
+                if keyword.strip():
+                    st.toast("🔍 검색 중입니다.. 조금만 기다려주세요!")
 
         # 필터 값이 변경되었을 때만 갱신하는 함수
         def update_applied_filters():
@@ -592,6 +845,8 @@ elif page == "search":
                 filters.append(f"지역: {st.session_state.location}")
             if st.session_state.house_type != "전체":
                 filters.append(f"유형: {st.session_state.house_type}")
+            if st.session_state.company_filter != "전체":
+                filters.append(f"공급기관: {st.session_state.company_filter}")
             st.session_state.applied_filters = filters
             # '적용' 버튼을 눌러야 applied_price가 업데이트되므로, 여기서는 price_slider만 건드리지 않음
             
@@ -647,8 +902,14 @@ elif page == "search":
                     key="location",
                     index=location_options.index(st.session_state.location)
                 )
-
-                house_types = ["전체", "행복주택", "청년주택", "공공임대"]
+                company_options = ["전체", "LH", "SH"]
+                st.selectbox(
+                    "공급기관", 
+                    company_options, 
+                    key="company_filter",
+                    index=company_options.index(st.session_state.company_filter)
+                )
+                house_types = ["전체", "도시형생활주택", "매입임대주택"]
                 st.selectbox(
                     "주택 유형", 
                     house_types, 
@@ -659,7 +920,7 @@ elif page == "search":
                 # 슬라이더는 popover에 넣어도 리스트를 밀어내지 않습니다.
                 st.slider(
                     "가격 범위 (만원)", 0, 10000,
-                    st.session_state.get("price_slider", (500, 2000)),
+                    st.session_state.price_slider,
                     key="price_slider"
                 )
                 st.slider(
@@ -670,89 +931,144 @@ elif page == "search":
 
                 # '적용' 버튼 클릭 시 필터 상태 업데이트 및 리스트 재검색 유도
                 if st.button("적용", use_container_width=True):
-                    # 가격 필터 적용
                     st.session_state.applied_price = st.session_state.price_slider
-                    # 필터 변경 사항을 반영하기 위해 rerun을 사용하거나, 리스트를 업데이트하는 함수를 호출합니다.
-                    # 여기서는 간단히 rerun하지 않고, 다음에 리스트를 그릴 때 세션 상태를 사용하도록 합니다.
+                    st.session_state.applied_area = st.session_state.area_slider
+
+                    # 지역 / 유형 / 공급기관
+                    st.session_state.applied_location = st.session_state.location
+                    st.session_state.applied_house_type = st.session_state.house_type
+                    st.session_state.applied_company = st.session_state.company_filter
+
+                    # 페이지는 1페이지로 리셋
+                    st.session_state.page_num = 1
+
                     st.toast("필터가 적용되었습니다.")
+                    st.rerun()
+        if "page_num" not in st.session_state:
+            st.session_state.page_num = 1
 
-        listings = [
-            {"name": "서울 강남구 역삼 행복주택", "location": "서울특별시 강남구 테헤란로 201 (역삼동)", "deposit": "보증금 2000만원 / 월 35만원", "area": "36.7㎡"},
-            {"name": "서울 마포구 상암 청년전세임대", "location": "서울특별시 마포구 월드컵북로 400 (상암동)", "deposit": "보증금 1000만원 / 월 18만원", "area": "29.8㎡"},
-            {"name": "서울 노원구 공릉 국민임대", "location": "서울특별시 노원구 동일로 138길 42 (공릉동)", "deposit": "보증금 1500만원 / 월 22만원", "area": "34.2㎡"},
-            {"name": "서울 송파구 가락 행복주택", "location": "서울특별시 송파구 중대로 140 (가락동)", "deposit": "보증금 2500만원 / 월 28만원", "area": "33.5㎡"},
-            {"name": "서울 관악구 봉천 청년매입임대", "location": "서울특별시 관악구 봉천로 227 (봉천동)", "deposit": "보증금 800만원 / 월 20만원", "area": "26.9㎡"},
-            {"name": "경기 수원시 권선 국민임대", "location": "경기도 수원시 권선구 권선로 308 (권선동)", "deposit": "보증금 1200만원 / 월 19만원", "area": "31.4㎡"},
-            {"name": "경기 고양시 덕양 행복주택", "location": "경기도 고양시 덕양구 행주로 50 (행주동)", "deposit": "보증금 2000만원 / 월 24만원", "area": "30.5㎡"},
-            {"name": "경기 성남시 수정 국민임대", "location": "경기도 성남시 수정구 수정로 123 (신흥동)", "deposit": "보증금 1800만원 / 월 26만원", "area": "33.1㎡"},
-            {"name": "경기 안양시 동안 행복주택", "location": "경기도 안양시 동안구 관악대로 312 (호계동)", "deposit": "보증금 1500만원 / 월 21만원", "area": "28.9㎡"},
-            {"name": "부산 해운대구 국민임대", "location": "부산광역시 해운대구 해운대로 620 (좌동)", "deposit": "보증금 1600만원 / 월 25만원", "area": "32.4㎡"},
-            {"name": "부산 사하구 행복주택", "location": "부산광역시 사하구 낙동대로 290 (당리동)", "deposit": "보증금 1400만원 / 월 22만원", "area": "30.7㎡"},
-            {"name": "부산 동래구 청년임대", "location": "부산광역시 동래구 중앙대로 1267 (온천동)", "deposit": "보증금 900만원 / 월 18만원", "area": "29.0㎡"},
-            {"name": "부산 북구 국민임대", "location": "부산광역시 북구 금곡대로 202 (금곡동)", "deposit": "보증금 1700만원 / 월 24만원", "area": "31.2㎡"},
-            {"name": "부산 수영구 행복주택", "location": "부산광역시 수영구 광안해변로 150 (광안동)", "deposit": "보증금 2000만원 / 월 27만원", "area": "33.3㎡"},
-            {"name": "대구 수성구 행복주택", "location": "대구광역시 수성구 달구벌대로 2480 (범어동)", "deposit": "보증금 1500만원 / 월 23만원", "area": "30.2㎡"},
-            {"name": "대구 달서구 국민임대", "location": "대구광역시 달서구 월배로 250 (상인동)", "deposit": "보증금 1200만원 / 월 19만원", "area": "29.5㎡"},
-            {"name": "대구 북구 청년임대", "location": "대구광역시 북구 칠곡중앙대로 180 (구암동)", "deposit": "보증금 800만원 / 월 17만원", "area": "28.1㎡"},
-            {"name": "대구 동구 행복주택", "location": "대구광역시 동구 아양로 75 (신암동)", "deposit": "보증금 1300만원 / 월 21만원", "area": "31.0㎡"},
-            {"name": "대구 중구 매입임대", "location": "대구광역시 중구 달성로 136 (대신동)", "deposit": "보증금 900만원 / 월 18만원", "area": "28.7㎡"},
-            {"name": "인천 서구 검단 행복주택", "location": "인천광역시 서구 불로로 160 (불로동)", "deposit": "보증금 2000만원 / 월 25만원", "area": "32.8㎡"},
-            {"name": "인천 남동구 청년전세임대", "location": "인천광역시 남동구 인주대로 620 (구월동)", "deposit": "보증금 1000만원 / 월 16만원", "area": "29.2㎡"},
-            {"name": "인천 부평구 국민임대", "location": "인천광역시 부평구 경원대로 1120 (십정동)", "deposit": "보증금 1800만원 / 월 23만원", "area": "31.6㎡"},
-            {"name": "인천 중구 행복주택", "location": "인천광역시 중구 제물량로 250 (신흥동)", "deposit": "보증금 1500만원 / 월 20만원", "area": "30.4㎡"},
-            {"name": "광주 북구 행복주택", "location": "광주광역시 북구 하서로 120 (매곡동)", "deposit": "보증금 1300만원 / 월 22만원", "area": "31.1㎡"},
-            {"name": "광주 남구 국민임대", "location": "광주광역시 남구 서문대로 105 (진월동)", "deposit": "보증금 1100만원 / 월 19만원", "area": "30.3㎡"},
-            {"name": "광주 서구 청년임대", "location": "광주광역시 서구 상무대로 950 (화정동)", "deposit": "보증금 900만원 / 월 17만원", "area": "28.4㎡"},
-            {"name": "광주 동구 행복주택", "location": "광주광역시 동구 중앙로 180 (대인동)", "deposit": "보증금 1200만원 / 월 20만원", "area": "29.8㎡"},
-            {"name": "광주 광산구 국민임대", "location": "광주광역시 광산구 하남대로 280 (신가동)", "deposit": "보증금 1400만원 / 월 23만원", "area": "32.0㎡"},
-            {"name": "대전 서구 행복주택", "location": "대전광역시 서구 둔산로 102 (둔산동)", "deposit": "보증금 1800만원 / 월 24만원", "area": "31.8㎡"},
-            {"name": "대전 유성구 국민임대", "location": "대전광역시 유성구 대학로 91 (궁동)", "deposit": "보증금 1500만원 / 월 21만원", "area": "30.5㎡"},
-            {"name": "대전 동구 청년임대", "location": "대전광역시 동구 동서대로 1650 (용전동)", "deposit": "보증금 1000만원 / 월 18만원", "area": "28.7㎡"},
-            {"name": "대전 중구 행복주택", "location": "대전광역시 중구 중앙로 130 (문화동)", "deposit": "보증금 1300만원 / 월 20만원", "area": "30.1㎡"},
-            {"name": "대전 대덕구 국민임대", "location": "대전광역시 대덕구 한밭대로 1098 (오정동)", "deposit": "보증금 1200만원 / 월 19만원", "area": "29.4㎡"},
-            {"name": "세종시 아름 행복주택", "location": "세종특별자치시 한누리대로 312 (어진동)", "deposit": "보증금 2000만원 / 월 26만원", "area": "32.6㎡"},
-            {"name": "강원 춘천시 국민임대", "location": "강원특별자치도 춘천시 공지로 250 (효자동)", "deposit": "보증금 1100만원 / 월 18만원", "area": "29.9㎡"},
-            {"name": "강원 원주시 행복주택", "location": "강원특별자치도 원주시 시청로 50 (무실동)", "deposit": "보증금 1500만원 / 월 21만원", "area": "31.7㎡"},
-            {"name": "강원 강릉시 청년임대", "location": "강원특별자치도 강릉시 강릉대로 230 (교동)", "deposit": "보증금 800만원 / 월 17만원", "area": "28.6㎡"},
-            {"name": "제주 제주시 국민임대", "location": "제주특별자치도 제주시 중앙로 210 (이도이동)", "deposit": "보증금 1600만원 / 월 23만원", "area": "30.9㎡"},
-            {"name": "제주 서귀포시 행복주택", "location": "제주특별자치도 서귀포시 중앙로 70 (서귀동)", "deposit": "보증금 1400만원 / 월 21만원", "area": "30.2㎡"},
-            {"name": "울산 남구 국민임대", "location": "울산광역시 남구 삼산로 200 (삼산동)", "deposit": "보증금 1300만원 / 월 20만원", "area": "30.0㎡"},
-            {"name": "울산 북구 행복주택", "location": "울산광역시 북구 산업로 1200 (화봉동)", "deposit": "보증금 1100만원 / 월 19만원", "area": "29.3㎡"},
-            {"name": "충북 청주시 국민임대", "location": "충청북도 청주시 상당구 상당로 150 (남문로)", "deposit": "보증금 1500만원 / 월 22만원", "area": "31.0㎡"},
-            {"name": "전북 전주시 행복주택", "location": "전라북도 전주시 완산구 팔달로 250 (중앙동)", "deposit": "보증금 1400만원 / 월 20만원", "area": "30.4㎡"},
-            {"name": "경남 창원시 청년임대", "location": "경상남도 창원시 의창구 원이대로 450 (용호동)", "deposit": "보증금 1000만원 / 월 17만원", "area": "29.8㎡"},
-            {"name": "경북 포항시 행복주택", "location": "경상북도 포항시 북구 중흥로 100 (두호동)", "deposit": "보증금 1300만원 / 월 20만원", "area": "30.8㎡"},
-            {"name": "경북 구미시 국민임대", "location": "경상북도 구미시 송동로 180 (도량동)", "deposit": "보증금 1100만원 / 월 18만원", "area": "29.6㎡"}
-        ]
-        def kakao_geocode(address: str):
-            url = "https://dapi.kakao.com/v2/local/search/address.json"
-            headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
-            params = {"query": address}
-            res = requests.get(url, headers=headers, params=params, timeout=5)
+        # ✅ 1) 적용된 필터 값 읽어오기
+        applied_location = st.session_state.get("applied_location", "전체")
+        applied_house_type = st.session_state.get("applied_house_type", "전체")
+        applied_company = st.session_state.get("applied_company", "전체")  # (현재는 프론트에서만 사용 가능)
+        applied_price = st.session_state.get("applied_price", None)        # (min, max) 단위: "만원"
+        applied_area = st.session_state.get("applied_area", None)          # (min, max) 단위: ㎡
 
-            # 상태코드가 200이 아니면 왜 그런지 보자
-            if res.status_code != 200:
-                print(f"[ERROR {res.status_code}] {address} -> {res.text}")
-                return None, None
+        # ✅ 2) UI → API 파라미터 변환
 
-            data = res.json()
-            docs = data.get("documents", [])
-            if not docs:
-                print(f"[NO_MATCH] {address}")
-                return None, None
+        # location: "전체" → None (필터 안씀)
+        api_location = None if applied_location == "전체" else applied_location
 
-            lat = float(docs[0]["y"])
-            lon = float(docs[0]["x"])
-            return lat, lon
-            
+        # subscription_types: 주택 유형 (도시형생활주택 / 매입임대주택)
+        subscription_types: list[str] = []
+        if applied_house_type != "전체":
+            subscription_types = [applied_house_type]
+
+        unit_types: list[str] = []
+
+        if (
+            applied_location == "전체"
+            and applied_house_type == "전체"
+            and applied_company == "전체"
+        ):
+            api_location = None
+            subscription_types = []
+            min_rent = 0
+            max_rent = 0
+            min_area = 0
+            max_area = 0
+
+        listings = fetch_listings_from_backend(
+            skip=0,
+            limit=100,
+            location=None,
+            subscription_types=subscription_types,
+            min_deposit=0,      # 지금은 별도 UI 없으니 0 (필터 없음)
+            max_deposit=0,
+            min_rent=min_rent,
+            max_rent=max_rent,
+            min_area=min_area,
+            max_area=max_area,
+            unit_types=unit_types,
+        )
+
+        # ==== 💰 가격 필터 (보증금 기준, 만원 → 원) ====
+        applied_price = st.session_state.get("applied_price", None)
+        if applied_price:
+            min_price, max_price = applied_price  # 예: (500, 2000)  -> 만원 단위
+            min_price *= 10000
+            max_price *= 10000
+
+            listings = [
+                item for item in listings
+                if item.get("deposit_amount_krw") is not None
+                and min_price <= item["deposit_amount_krw"] <= max_price
+            ]
+
+        # ==== 📏 면적 필터 (㎡) ====
+        applied_area = st.session_state.get("applied_area", None)
+        if applied_area:
+            min_area, max_area = applied_area
+
+            listings = [
+                item for item in listings
+                if item.get("area_m2") is not None
+                and min_area <= item["area_m2"] <= max_area
+            ]
+
+        applied_location = st.session_state.get("applied_location", "전체")
+        if applied_location != "전체":
+            listings = [
+                item for item in listings
+                if item.get("region") == applied_location
+            ] 
+        # ✅ house type 1:1 필터 (subscription_type 기준)
+        applied_house_type = st.session_state.get("applied_house_type", "전체")
+        if applied_house_type != "전체":
+            listings = [
+                item for item in listings
+                if item.get("subscription_type") == applied_house_type
+            ]
+
+        # ✅ company 1:1 필터 (company_type 기준)
+        applied_company = st.session_state.get("applied_company", "전체")
+        if applied_company != "전체":
+            listings = [
+                item for item in listings
+                if item.get("company_type") == applied_company
+            ]
+        keyword = (st.session_state.get("search_text") or "").strip()
+        if keyword:
+            kw = keyword.lower()
+            tokens = [t for t in kw.split() if t]  # '청년', '매입임대주택' 이런 식
+
+            def matches(item):
+                text = " ".join([
+                    item.get("name", ""),
+                    item.get("location", ""),
+                    item.get("complex", ""),
+                    item.get("subscription_type", ""),
+                ]).lower()
+
+                # 모든 토큰이 다 들어 있으면 매칭 (AND 검색)
+                return all(tok in text for tok in tokens)
+
+            listings = [item for item in listings if matches(item)]
         # ---- 페이지네이션 (공고 리스트 아래) ----
-        items_per_page = 5  
+        items_per_page = 4  
         if "page_num" not in st.session_state:
             st.session_state.page_num = 1
 
         # 전체 페이지 계산
-        total_pages = len(listings) // items_per_page + (1 if len(listings) % items_per_page else 0)
+        total_pages = max(1, (len(listings) + items_per_page - 1) // items_per_page)
 
+        # 현재 페이지 번호를 유효 범위로 보정
+        if st.session_state.page_num < 1:
+            st.session_state.page_num = 1
+        elif st.session_state.page_num > total_pages:
+            st.session_state.page_num = total_pages
+
+        current_page = st.session_state.page_num
         # 현재 페이지에 해당하는 공고만 표시
         start = (st.session_state.page_num - 1) * items_per_page
         end = start + items_per_page
@@ -799,7 +1115,33 @@ elif page == "search":
         .listing-title {
             font-weight: 700;
             margin-bottom: 4px;
-        }
+            font-size: 15px;
+            line-height: 1.35;
+
+            /* 최대 2줄까지만 보이게 + 나머지는 … 처리 */
+            display: -webkit-box;
+            -webkit-line-clamp: 2;          /* 2줄까지만 */
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            word-break: keep-all;   
+        }     
+        .listing-sub.clamp-1 {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }    
+        .complex-pill {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #1d4ed8;              /* 글자색 */
+            background: #e0edff;          /* 연한 파란 배경 */
+            border-radius: 999px;         /* 동그란 알약 모양 */
+            vertical-align: middle;
+            white-space: nowrap;
+        }     
         .listing-sub {
             font-size: 13px;
             line-height: 1.3;
@@ -809,6 +1151,7 @@ elif page == "search":
             height: 78px;
             border-radius: 10px;
             object-fit: cover;
+            flex-shrink: 0.
         }
         </style>
         """, unsafe_allow_html=True)
@@ -820,7 +1163,9 @@ elif page == "search":
         for idx, item in enumerate(page_items):
             # 이미지 소스 그대로
             image_src = apt_base64_src if apt_base64_src else "https://via.placeholder.com/80x80?text=No+Img"
-
+            complex_html = ""
+            if item.get("complex"):
+                complex_html = f"<span class='complex-pill'>{item['complex']}</span>"
             # 버튼으로 만들기
             with st.container():
                 clicked = st.button(
@@ -842,13 +1187,14 @@ elif page == "search":
                     border-radius:16px;
                     box-shadow:0 4px 12px rgba(15,23,42,0.08);
                     padding:14px 16px;          /* ✅ 안쪽 여백 */
-                    margin-bottom:-45px;
+                    margin-bottom:-40px;
                 ">                    
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-                        <div class="listing-text">
-                            <div class="listing-title">{item['name']}</div>
-                            <div class="listing-sub">📍 {item['location']}</div>
-                            <div class="listing-sub">💰 {item['deposit']}</div>
+                        <div class="listing-text" style="flex:1; min-width:0;">
+                            <div class="listing-title">{item['name']}{complex_html}</div>
+                            <div class="listing-sub"> 📅 공고일&nbsp;{item.get('notice_date', '')}</div>
+                            <div class="listing-sub clamp-1">📍 {item['location']}</div>
+                            <div class="listing-sub clamp-1">💰 {item.get('deposit_short', item['deposit'])}</div>
                         </div>
                         <img src="{image_src}" class="listing-img">
                     </div>
@@ -859,54 +1205,52 @@ elif page == "search":
             if clicked:
                 st.session_state.selected_listing = item
 
-        # 페이지네이션 버튼 (유지)
-        max_buttons = 5
-        current = st.session_state.page_num
+        # 공고 개수
+        num_items = len(page_items)
 
-        if total_pages <= max_buttons:
-            start_page = 1
-            end_page = total_pages
+        # 🔧 0개일 때만 아래로 밀어서 위치 맞춰주기
+        if num_items == 0:
+            st.markdown(
+                """
+                <div style="
+                    margin-top: 40px;
+                    text-align: center;
+                    color: #6b7280;
+                    font-size: 16px;
+                ">
+                    🔍 검색된 공고가 없습니다
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
         else:
-            start_page = ((current - 1) // max_buttons) * max_buttons + 1
-            end_page = min(start_page + max_buttons - 1, total_pages)
+            VISIBLE_PAGES = 5
+            cols = st.columns(VISIBLE_PAGES + 2)
 
-        # ... (페이지네이션 버튼 로직 유지)
+            # ◀ 이전
+            with cols[0]:
+                if st.button("◀", key="prev_page_btn"):
+                    # 1보다 작아지지 않게만 막기
+                    st.session_state.page_num = max(1, st.session_state.page_num - 1)
+                    st.session_state.selected_listing = None
+                    st.rerun()
 
-        cols = st.columns((end_page - start_page + 1) + 2) 
-        with cols[0]:
-            if st.button("◀", key="prev_page_btn") and st.session_state.page_num > 1:
-                st.session_state.page_num -= 1
-                st.session_state.selected_listing = None
-        for i, page_num in enumerate(range(start_page, end_page+1)):
-            with cols[i+1]:
-                if page_num == st.session_state.page_num:
-                    st.markdown(f"""
-                        <button style="
-                            background-color:#F0F2F6;
-                            color:#2F4F6F;
-                            font-weight:bold;
-                            border:none; 
-                            border-radius:5px;
-                            padding:5px 10px;
-                            margin:0 3px;
-                            width:40px;
-                            height:38px;
-                            line-height:1; 
-                            display:flex;
-                            align-items:center;
-                            justify-content:center;
-                            cursor:default;
-                            transform: translateY(1px);
-                        ">{page_num}</button>
-                    """, unsafe_allow_html=True)
-                else:
+            # 1~5 페이지 버튼 (전부 st.button 사용)
+            for i, page_num in enumerate(range(1, VISIBLE_PAGES + 1)):
+                with cols[i + 1]:
+                    # 현재 페이지는 눌러도 아무 일 안 일어나게만 처리
                     if st.button(str(page_num), key=f"page_btn_{page_num}"):
                         st.session_state.page_num = page_num
                         st.session_state.selected_listing = None
-        with cols[-1]:
-            if st.button("▶", key="next_page_btn") and st.session_state.page_num < total_pages:
-                st.session_state.page_num += 1
-                st.session_state.selected_listing = None
+                        st.rerun()
+
+            # ▶ 다음
+            with cols[-1]:
+                if st.button("▶", key="next_page_btn"):
+                    # 5보다 커지지 않게만 막기
+                    st.session_state.page_num = min(VISIBLE_PAGES, st.session_state.page_num + 1)
+                    st.session_state.selected_listing = None
+                    st.rerun()
                 
     # ---- 오른쪽: 지도 영역 ----
     with col_map:
@@ -1018,7 +1362,8 @@ elif page == "search":
                     icon=region_icon,
                     z_index_offset=count*1000
                 ).add_to(m)
-                
+        
+        addr_to_point = fetch_map_points_from_backend()
         for item in listings:
             # 1) 리스트에 이미 lat/lon이 들어있으면 그걸 쓰고
             lat = item.get("lat")
@@ -1029,15 +1374,46 @@ elif page == "search":
                 addr = item.get("location")
                 if not addr:
                     continue
-                lat, lon = kakao_geocode(addr)  # ⬅️ 위쪽에 이미 정의해둔 함수 그대로 사용
-                if not lat or not lon:
-                    # 이 공고는 좌표가 안 나왔으니까 그냥 건너뛴다
-                    continue
-                # 성공했으면 item에 저장해두면 다음 rerun 때 또 안 부름
+                p = addr_to_point.get(addr)
+
+                if p:
+                    lat = p["lat"]
+                    lon = p["lon"]
+                    item["lat"] = lat
+                    item["lon"] = lon               
+                
+                else:
+                    lat, lon = kakao_geocode(addr)
+                    if not lat or not lon:
+                        continue
+                    item["lat"] = lat
+                    item["lon"] = lon
+                    time.sleep(0.25)
                 item["lat"] = lat
                 item["lon"] = lon
                 time.sleep(0.25)  # 카카오가 너무 빠르게 많이 부르면 429 나올 수 있어서 살짝 쉬기
+            agency = (item.get("company_type") or "").strip()          # LH, SH 등
+            sub_type = (item.get("subscription_type") or "").strip()   # 행복주택, 장기전세주택 등
+            title_text = (item.get("name") or "") + " " + sub_type
+            complex_name = item.get("complex") or item.get("name")
 
+            # 🔹 앞에 붙일 한글 키워드 (행복 / 장기 / 청년 등)
+            label_prefix = ""
+            if "행복주택" in title_text:
+                label_prefix = "행복"
+            elif "장기전세" in title_text:
+                label_prefix = "장기"
+            elif "청년" in title_text:
+                label_prefix = "청년"
+            # 필요하면 여기 조건 더 추가해서 커스터마이즈 가능
+
+            # 🔹 최종 라벨: "행복 LH", "장기 LH" 이런 식
+            if label_prefix and agency:
+                header_text = f"{label_prefix} {agency}"
+            elif agency:
+                header_text = agency
+            else:
+                header_text = item.get("complex") or item.get("name") or "공고"
             # 3) 이제 지도에 찍기
             popup_html = f"""
             <div class="individual-listing-marker" style="
@@ -1065,14 +1441,14 @@ elif page == "search":
                     padding: 3px 0 4px 0;
                     font-size: 12px;
                 ">
-                    {'국민 LH'}
+                    {header_text}
                 </div>
 
                 <!-- 흰색 본체 -->
                 <div style="padding: 5px 6px 6px 6px;">
                     <div style="font-weight: 500;">{item.get('area', '—')}</div>
-                    <div style="color: #000; font-weight: 600;">
-                        {item.get('deposit', '—')}
+                    <div style="color: #000; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {item.get('deposit_short', item.get('deposit', '임대조건 정보 없음'))}
                     </div>
                 </div>
 
@@ -1090,10 +1466,18 @@ elif page == "search":
                 "></div>
             </div>
             """
-            folium.Marker(
-                location=[lat, lon],
-                icon=folium.DivIcon(html=popup_html)
-            ).add_to(m)
+            tooltip_html = f"""
+            <div style="font-family:'Pretendard','Malgun Gothic',sans-serif; font-size:11px;">
+            <b>{complex_name}</b><br>
+            <span style="color:#6b7280;">{item.get('location', '')}</span>
+            </div>
+            """
+            # marker = folium.Marker(
+            #     location=[lat, lon],
+            #     icon=folium.DivIcon(html=popup_html)
+            # )
+            # marker.add_child(folium.Tooltip(tooltip_html, sticky=True))
+            # marker.add_to(m)
 
         # folium 내부 JS 삽입을 위한 클래스 정의
         from folium import MacroElement
@@ -1163,40 +1547,120 @@ elif page == "search":
             st.session_state.selected_listing = None
             st.rerun()
         selected = st.session_state.selected_listing
-        if selected:
-            공고일 = "25.11.07"
-            접수일 = "25.11.25 ~ 25.11.27"
-            조회수 = "193"
-            공급대상 = "무주택 청년, 대학생(청년), 신혼부부 등"
-            공급지역 = selected["location"]
-            모집단지 = "1개 단지 (총 모집호수 93)"
+        def convert_summary_to_html(text: str) -> str:
+            if not text or not isinstance(text, str):
+                return "공급대상 정보는 공고문을 참고하세요."
 
-            st.markdown(f"""
+            import re
+            sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+            sentences = [s.strip() for s in sentences if len(s.strip()) > 1]
+
+            # 줄바꿈으로만 구분
+            joined = "<br>".join(f"• {s}" for s in sentences)
+
+            # 앞뒤 개행/공백 없이 한 줄로 반환
+            return f'<span style="font-size:13px; line-height:1.5;">{joined}</span>'
+        def convert_rent_to_html(text: str) -> str:
+            """
+            임대조건 긴 문장을 줄바꿈해서 보기 좋게 만드는 함수
+            (공급대상과 비슷한 스타일)
+            """
+            if not text or not isinstance(text, str):
+                return "임대조건 정보는 공고문을 참고하세요."
+
+            import re
+            # 마침표 기준으로 문장 나누기 (한국어/영어 둘 다 대략 커버)
+            sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+            sentences = [s.strip() for s in sentences if len(s.strip()) > 1]
+
+            # • 불릿 붙여서 줄바꿈
+            joined = "<br>".join(f"• {s}" for s in sentences)
+
+            # 한 줄짜리 HTML로 반환 (앞뒤 개행/들여쓰기 없음 → 밑 HTML 안 깨짐)
+            return f'<span style="font-size:13px; line-height:1.5;">{joined}</span>'
+        if selected:
+            공고일 = selected.get("notice_date", "-")
+            접수일 = selected.get("application_period", "-")
+            조회수 = "-"  # 조회수는 백엔드에 없으면 그냥 '-' 로 두자
+            raw_공급대상 = selected.get("eligibility_summary", "")
+            공급대상_html = convert_summary_to_html(raw_공급대상)
+            공급지역 = selected.get("location", "-")
+            모집단지 = selected.get("complex", "모집단지 정보 없음")
+            임대조건_html = convert_rent_to_html(selected.get("deposit", ""))
+            전용면적 = selected.get("area", "-")  
+            보증금 = selected.get("deposit", "-")  
+            월세 = selected.get("monthly_rent_krw", None)
+            # 월세 숫자값이 있을 때 표시용 문자열로 변환
+            if 월세 is None:
+                월세_text = "-"
+            else:
+                # 350000 → "35만원"
+                if 월세 >= 10000:
+                    월세_text = f"{월세 // 10000}만원"
+                else:
+                    월세_text = f"{월세}원"
+            rows = []
+            for step in selected.get("timeline_steps", []):
+                step_name = (step.get("step_name") or "").strip()
+                period = (step.get("period") or "").strip()
+                if not step_name and not period:
+                    continue
+
+                # 줄바꿈/들여쓰기 없이 한 덩어리로 만들기
+                rows.append(
+                    f'<div style="display:flex; border-bottom:1px solid #e2e8f0;">'
+                    f'<div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">{step_name}</div>'
+                    f'<div style="flex:1; padding:9px 10px; font-size:12.5px;">{period}</div>'
+                    f'</div>'
+                )
+
+            # 사이에 굳이 개행 넣지 말고 바로 이어붙여도 됨
+            timeline_rows = "".join(rows)
+
+            raw_link = selected.get("link", "")
+            link_href = raw_link if raw_link else "#"
+
+            panel_html = f"""
             <div class="detail-panel">
                 <div class="detail-header">
-                    <div class="detail-badge">{selected.get('type', '공공임대')}</div>
+                    <div class="detail-badge">{selected.get('subscription_type', '공공임대')}</div>
                     <div class="detail-title">{selected['name']}</div>
                     <div class="detail-sub">{selected['location']}</div>
                     <div class="detail-meta">
                         <div>공고일 {공고일}</div>
                         <div>접수일 {접수일}</div>
-                        <div>조회 {조회수}</div>
                     </div>
                 </div>
                 <div class="detail-body">
                     <div class="section-title">공급대상 및 임대조건</div>
                     <div class="section-box">
-                        <div class="section-row">
-                            <span class="section-label">공급대상</span>
-                            <span class="section-value">{공급대상}</span>
+                    <div style="margin-bottom:14px;">
+                        <div style="font-weight:600; color:#475569; margin-bottom:6px; font-size:14px;">공급대상</div>
+                        <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:10px;
+                                    padding:10px 12px; font-size:13px; line-height:1.55;">
+                            {공급대상_html}
                         </div>
-                        <div class="section-row">
-                            <span class="section-label">공급지역</span>
-                            <span class="section-value">{공급지역}</span>
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <div style="font-weight:600; color:#475569; margin-bottom:6px; font-size:14px;">
+                            공급지역
                         </div>
-                        <div class="section-row">
-                            <span class="section-label">임대조건</span>
-                            <span class="section-value">{selected['deposit']}</span>
+                        <div style="
+                            background:#ffffff;
+                            border:1px solid #e2e8f0;
+                            border-radius:10px;
+                            padding:8px 10px;
+                            font-size:13px;
+                            line-height:1.5;
+                        ">
+                            {공급지역}
+                        </div>
+                    </div>
+                        <div>
+                            <div style="font-weight:600; color:#475569; margin-bottom:6px; font-size:14px;">임대조건</div>
+                            <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.55;">
+                                {임대조건_html}
+                            </div>
                         </div>
                     </div>
                     <div class="section-title" style="margin-top:14px;">모집단지</div>
@@ -1205,45 +1669,31 @@ elif page == "search":
                             <span class="section-label">모집단지</span>
                             <span class="section-value">{모집단지}</span>
                         </div>
-                        <div style="margin-top:6px; font-size:12.5px; color:#0f766e; cursor:pointer;">
-                            단지 상세보기 &rsaquo;
+                        <div class="section-row">
+                            <span class="section-label">전용면적</span>
+                            <span class="section-value">{전용면적}</span>
+                        </div>
+                        <div class="section-row">
+                            <span class="section-label">월세</span>
+                            <span class="section-value">{월세_text}</span>
                         </div>
                     </div>
-                    <div class="section-title" style="margin-top:14px;">공급일정</div>
-                    <div class="section-box" style="padding:0;">
-                        <div style="display:flex; border-bottom:1px solid #e2e8f0;">
-                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">접수기간</div>
-                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2025.11.24 ~ 2025.11.28</div>
-                        </div>
-                        <div style="display:flex; border-bottom:1px solid #e2e8f0;">
-                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">서류제출대상자 발표일</div>
-                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2025.12.12</div>
-                        </div>
-                        <div style="display:flex; border-bottom:1px solid #e2e8f0;">
-                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">서류접수기간</div>
-                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2025.12.15 ~ 2025.12.19</div>
-                        </div>
-                        <div style="display:flex; border-bottom:1px solid #e2e8f0;">
-                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">당첨자발표일</div>
-                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2026.04.17</div>
-                        </div>
-                        <div style="display:flex;">
-                            <div style="width:45%; background:#f8fafc; padding:9px 10px; font-size:12.5px;">계약기간</div>
-                            <div style="flex:1; padding:9px 10px; font-size:12.5px;">2026.05.12 ~ 2026.05.14</div>
-                        </div>
-                    </div>
-                    <div class="section-title" style="margin-top:14px;">문의</div>
-                    <div class="section-box">
-                        LH / SH 고객센터<br>
-                        접수 전 공고문 원문을 반드시 확인하세요.
-                    </div>
-                </div>
-                  <a href="https://www.i-sh.co.kr/main/lay2/program/S1T294C295/www.jbdc.co.kr" 
-                    target="_blank" style="text-decoration:none;">
-                    <div class="detail-footer">공고 원문보기</div>
-                </a>
-                </div>
+            <div class="section-title" style="margin-top:14px;">공급일정</div>
+            <div class="section-box" style="padding:0;">
+                {timeline_rows}
             </div>
-            """, unsafe_allow_html=True)
+            <div class="section-title" style="margin-top:14px;">문의</div>
+            <div class="section-box">
+                LH / SH 고객센터<br>
+                접수 전 공고문 원문을 반드시 확인하세요.
+            </div>
+            </div>
+            <a href="{link_href}"
+            target="_blank" style="text-decoration:none;">
+                <div class="detail-footer">공고 원문보기</div>
+            </a>
+            </div>
+            """
+            st.markdown(panel_html, unsafe_allow_html=True)
         
 st.markdown('</div>', unsafe_allow_html=True)
