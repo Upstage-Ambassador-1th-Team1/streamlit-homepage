@@ -80,20 +80,30 @@ def fetch_listings_from_backend(
 ):
     try:
         payload = {
-            "location": location,                          # None이면 전체
-            "subscription_types": subscription_types or [],# []이면 전체
-            "min_deposit": min_deposit or 0,              # 0이면 필터 없음으로 처리한다고 가정
-            "max_deposit": max_deposit or 0,
-            "min_rent": min_rent or 0,
-            "max_rent": max_rent or 0,
-            "min_area": min_area or 0,
-            "max_area": max_area or 0,
-            "unit_types": unit_types or [],
+            "districts": [location] if location else [],
+            "subscription_types": subscription_types or [],
+            "exclude_zero_prices": True,
+            "company_types": [],
             "skip": skip,
             "limit": limit,
-            "sort_by": "created_at",
+            "sort_by": "published_date",
             "sort_order": "desc",
         }
+
+        if min_deposit is not None:
+            payload["min_deposit"] = min_deposit
+        if max_deposit is not None:
+            payload["max_deposit"] = max_deposit
+
+        if min_rent is not None:
+            payload["min_rent"] = min_rent
+        if max_rent is not None:
+            payload["max_rent"] = max_rent
+
+        if min_area is not None:
+            payload["min_area"] = min_area
+        if max_area is not None:
+            payload["max_area"] = max_area
 
         resp = requests.post(
             f"{HOUSING_API_URL}/api/v1/search",
@@ -106,11 +116,14 @@ def fetch_listings_from_backend(
         raw_listings = []
 
         for ann in data.get("items", []):
-            prog = ann.get("program_info") or {}
+            # 1) 공고(announcement) 레벨 정보
             company_type = ann.get("company_type") or ""
             subscription_type = ann.get("subscription_type") or ""
+
             raw_notice_date = ann.get("published_date") or ann.get("announcement_date") or ""
             notice_date = format_date(raw_notice_date)
+
+            prog = ann.get("program_info") or {}
             eligibility_summary = (prog.get("eligibility_summary") or "").strip()
             timeline = prog.get("timeline_steps") or []
             application_period = ""
@@ -124,14 +137,14 @@ def fetch_listings_from_backend(
             link = ann.get("link") or ""
             department = ann.get("department") or ""
 
-            # 백엔드 스펙: supply_projects 안에 실제 세대/단지 정보가 들어간다고 가정
-            units = prog.get("supply_units") or prog.get("supply_projects") or []
+            # 2) 이 공고에 딸린 개별 공급단위들(supply_projects)을 순회
+            units = prog.get("supply_projects") or prog.get("supply_units") or []
 
-            for u in units:
-                deposit_text = (u.get("deposit_and_rent_text") or "").strip()
-                depo = u.get("deposit_amount_krw") or 0
-                rent = u.get("monthly_rent_krw") or 0
-                area_m2 = u.get("exclusive_area_m2")
+            for sp in units:
+                deposit_text = (sp.get("deposit_and_rent_text") or "").strip()
+                depo = sp.get("deposit_amount_krw") or 0
+                rent = sp.get("monthly_rent_krw") or 0
+                area_m2 = sp.get("exclusive_area_m2")
 
                 if not deposit_text:
                     if depo or rent:
@@ -143,22 +156,20 @@ def fetch_listings_from_backend(
                     else:
                         deposit_text = "임대조건: 공고문 참고"
 
-                complex_name = u.get("location_label") or ""
-                addr_full = u.get("location_full_address") or ""
+                complex_name = sp.get("location_label") or ""
+                addr_full = sp.get("location_full_address") or ""
+
                 raw_listings.append(
                     {
-                        "id": u.get("id") or ann.get("id"),
-                        "name": ann.get("title"),
+                        "id": sp.get("id") or ann.get("id"),
+                        "name": ann.get("announcement_title") or ann.get("title"),
                         "complex": complex_name,
-                        "location": u.get("location_full_address") or "",
-                        "region": extract_region_from_address(addr_full), 
+                        "location": addr_full,
+                        "region": extract_region_from_address(addr_full),
                         "deposit": deposit_text,
                         "deposit_short": extract_short_rent(deposit_text),
-                        "area": (
-                            f"{area_m2}㎡"
-                            if area_m2
-                            else "-"
-                        ),
+                        "area": f"{area_m2}㎡" if area_m2 else "-",
+
                         "notice_date": notice_date,
                         "application_period": application_period,
                         "company_type": company_type,
@@ -168,13 +179,12 @@ def fetch_listings_from_backend(
                         "link": link,
                         "department": department,
 
-                        # 숫자 필터용 값들도 같이 들고 있기
+                        # 숫자 필터용 원본 값
                         "area_m2": area_m2,
                         "deposit_amount_krw": depo,
                         "monthly_rent_krw": rent,
                     }
                 )
-
         # 🔹 중복 제거 (이름 + 주소 기준)
         dedup = {}
         for item in raw_listings:
@@ -192,6 +202,7 @@ def fetch_listings_from_backend(
         listings = list(dedup.values())
         sub_types = sorted({ (item.get("subscription_type") or "") for item in listings })
         companies = sorted({ (item.get("company_type") or "") for item in listings })
+        print("[DEBUG] search payload:", payload)
         print("[DEBUG] subscription_type 리스트:", sub_types)
         print("[DEBUG] company_type 리스트:", companies)
         print(
@@ -292,24 +303,25 @@ page = st.session_state.page
 st.markdown(f"""
 <style>
 div[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"] {{
-    justify-content: flex-start !important; 
+    justify-content: center !important; 
 }}
 
 /* 사이드바의 버튼 자체 스타일 (폰트 크기, 색상 등) */
 div[data-testid="stSidebar"] button {{
-    display: block;
-    width: 100%; /* 버튼이 사이드바 폭을 채우도록 설정 */
+    display: flex !important;              /* Flexbox 모델 사용 (내용물 정렬 용이) */
+    justify-content: center !important;    /* 버튼 내부 텍스트 가로 중앙 정렬 */
+    align-items: center !important;        /* 버튼 내부 텍스트 세로 중앙 정렬 */
+    width: 90% !important;                 /* 너비를 90%로 설정하여 양옆 여백 확보 */
+    margin: 0 auto !important;             /* 버튼 자체를 사이드바의 가로 중앙에 배치 */
+    margin-bottom: 15px !important;        /* 버튼 사이 간격 유지 */
     
-    margin-left: -30px !important; 
-    
-    text-align: left !important;
-    font-size: 24px;
+    /* 기존 폰트 스타일 유지 */
+    font-size: 34px;
     font-weight: bold;
     color: #2F4F6F;
     cursor: pointer;
-    transform: scale(1.0); /* 크기 변환을 1.1에서 1.0으로 수정하여 자연스럽게 만듭니다. */
-    margin-bottom: 15px;
-    background-color: transparent !important; /* 기본 배경색 투명화 */
+    transform: scale(1.0);
+    background-color: transparent !important;
     border: none;
     box-shadow: none;
 }}
@@ -441,11 +453,11 @@ with st.sidebar:
     current_page = params.get("page", ["home"])[0] 
 
     # 버튼 클릭 시 페이지 변경 (query_params 사용)
-    if st.button("채팅", key="home_btn", type="primary"):
+    if st.button("채팅", key="home_btn", type="secondary", use_container_width=True):
         st.query_params = {"page": ["home"]}
         st.rerun()
         
-    if st.button("공고 검색", key="search_btn", type="secondary"):
+    if st.button("공고 검색", key="search_btn", type="secondary", use_container_width=True):
         st.query_params = {"page": ["search"]}
         st.rerun()
 
@@ -461,7 +473,7 @@ with st.sidebar:
         font-weight: bold;
         border-radius: 0;
         padding: 8px 0;
-        text-align: left;
+        text-align: center;
         width: 100%;
     }
     </style>
@@ -895,7 +907,7 @@ elif page == "search":
             
             with filter_popover:
                 # 필터 위젯 배치
-                location_options = ["전체", "서울", "경기", "부산", "대구"]
+                location_options = ["전체", "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종", "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주"]
                 st.selectbox(
                     "지역 선택", 
                     location_options, 
@@ -909,7 +921,7 @@ elif page == "search":
                     key="company_filter",
                     index=company_options.index(st.session_state.company_filter)
                 )
-                house_types = ["전체", "도시형생활주택", "매입임대주택"]
+                house_types = ["전체", "공공임대", "국민공공임대주택", "국민임대", "도시형생활주택", "매입임대", "매입임대주택", "영구임대", "장기안심주택", "장기전세주택", "전세임대", "청년안심주택", "행복주택"]
                 st.selectbox(
                     "주택 유형", 
                     house_types, 
@@ -950,93 +962,70 @@ elif page == "search":
         # ✅ 1) 적용된 필터 값 읽어오기
         applied_location = st.session_state.get("applied_location", "전체")
         applied_house_type = st.session_state.get("applied_house_type", "전체")
-        applied_company = st.session_state.get("applied_company", "전체")  # (현재는 프론트에서만 사용 가능)
-        applied_price = st.session_state.get("applied_price", None)        # (min, max) 단위: "만원"
-        applied_area = st.session_state.get("applied_area", None)          # (min, max) 단위: ㎡
+        applied_company = st.session_state.get("applied_company", "전체")
+        applied_price = st.session_state.get("applied_price", None)   # (min, max) 만원
+        applied_area = st.session_state.get("applied_area", None)     # (min, max) ㎡
 
         # ✅ 2) UI → API 파라미터 변환
-
-        # location: "전체" → None (필터 안씀)
         api_location = None if applied_location == "전체" else applied_location
 
-        # subscription_types: 주택 유형 (도시형생활주택 / 매입임대주택)
         subscription_types: list[str] = []
         if applied_house_type != "전체":
             subscription_types = [applied_house_type]
 
         unit_types: list[str] = []
 
-        if (
-            applied_location == "전체"
-            and applied_house_type == "전체"
-            and applied_company == "전체"
-        ):
-            api_location = None
-            subscription_types = []
-            min_rent = 0
-            max_rent = 0
-            min_area = 0
-            max_area = 0
-
+        # ✅ 3) 가격 / 면적을 백엔드용 값으로 변환
+        if applied_price:
+            min_price, max_price = applied_price   # 만원
+            min_price *= 10_000                   # → 원
+            max_price *= 10_000
+        else:
+            min_price = None
+            max_price = None
+        if applied_area:
+            min_area, max_area = applied_area     # ㎡
+        else:
+            min_area = None
+            max_area = None
+        # ✅ 4) 백엔드에서 공고 가져오기 (여기서 필터 적용)
         listings = fetch_listings_from_backend(
             skip=0,
             limit=100,
-            location=None,
+            location=api_location,          # 🔹 지역 필터 적용
             subscription_types=subscription_types,
-            min_deposit=0,      # 지금은 별도 UI 없으니 0 (필터 없음)
-            max_deposit=0,
-            min_rent=min_rent,
-            max_rent=max_rent,
-            min_area=min_area,
+            min_deposit=min_price,          # 🔹 가격 필터 적용
+            max_deposit=max_price,
+            min_area=min_area,              # 🔹 면적 필터 적용
             max_area=max_area,
             unit_types=unit_types,
         )
 
-        # ==== 💰 가격 필터 (보증금 기준, 만원 → 원) ====
-        applied_price = st.session_state.get("applied_price", None)
-        if applied_price:
-            min_price, max_price = applied_price  # 예: (500, 2000)  -> 만원 단위
-            min_price *= 10000
-            max_price *= 10000
+        # ✅ 5) 여기서부터는 예전처럼 프론트에서 한 번 더 필터링
+        # (원하면 유지, 원하면 나중에 제거해도 됨)
 
-            listings = [
-                item for item in listings
-                if item.get("deposit_amount_krw") is not None
-                and min_price <= item["deposit_amount_krw"] <= max_price
-            ]
-
-        # ==== 📏 면적 필터 (㎡) ====
-        applied_area = st.session_state.get("applied_area", None)
-        if applied_area:
-            min_area, max_area = applied_area
-
-            listings = [
-                item for item in listings
-                if item.get("area_m2") is not None
-                and min_area <= item["area_m2"] <= max_area
-            ]
-
-        applied_location = st.session_state.get("applied_location", "전체")
+        # 지역 필터 (추가로 한 번 더 걸고 싶다면)
         if applied_location != "전체":
             listings = [
                 item for item in listings
                 if item.get("region") == applied_location
-            ] 
-        # ✅ house type 1:1 필터 (subscription_type 기준)
-        applied_house_type = st.session_state.get("applied_house_type", "전체")
+            ]
+
+        # house type 필터
         if applied_house_type != "전체":
             listings = [
                 item for item in listings
                 if item.get("subscription_type") == applied_house_type
             ]
 
-        # ✅ company 1:1 필터 (company_type 기준)
-        applied_company = st.session_state.get("applied_company", "전체")
+        # company 필터
         if applied_company != "전체":
             listings = [
                 item for item in listings
                 if item.get("company_type") == applied_company
             ]
+
+
         keyword = (st.session_state.get("search_text") or "").strip()
         if keyword:
             kw = keyword.lower()
@@ -1401,11 +1390,24 @@ elif page == "search":
             label_prefix = ""
             if "행복주택" in title_text:
                 label_prefix = "행복"
-            elif "장기전세" in title_text:
-                label_prefix = "장기"
             elif "청년" in title_text:
                 label_prefix = "청년"
-            # 필요하면 여기 조건 더 추가해서 커스터마이즈 가능
+            elif "장기" in title_text:
+                label_prefix = "장기"
+            elif "국민" in title_text:
+                label_prefix = "국민"
+            elif "영구" in title_text:
+                label_prefix = "영구"
+            elif "매입" in title_text:
+                label_prefix = "매입"
+            elif "전세" in title_text:
+                label_prefix = "전세"
+            elif "공공" in title_text:
+                label_prefix = "공공"
+            elif "도시형" in title_text:
+                label_prefix = "도시형"
+            else:
+                label_prefix = title_text
 
             # 🔹 최종 라벨: "행복 LH", "장기 LH" 이런 식
             if label_prefix and agency:
@@ -1472,12 +1474,12 @@ elif page == "search":
             <span style="color:#6b7280;">{item.get('location', '')}</span>
             </div>
             """
-            # marker = folium.Marker(
-            #     location=[lat, lon],
-            #     icon=folium.DivIcon(html=popup_html)
-            # )
-            # marker.add_child(folium.Tooltip(tooltip_html, sticky=True))
-            # marker.add_to(m)
+            marker = folium.Marker(
+                location=[lat, lon],
+                icon=folium.DivIcon(html=popup_html)
+            )
+            marker.add_child(folium.Tooltip(tooltip_html, sticky=True))
+            marker.add_to(m)
 
         # folium 내부 JS 삽입을 위한 클래스 정의
         from folium import MacroElement
