@@ -13,7 +13,7 @@ load_dotenv()
 
 KAKAO_API_KEY = "102d0b0b719c47186ef3afa94f03e00d"  # 예: "46c0a0f1e9f1a0...."
 CHAT_BACKEND_URL = os.getenv("CHAT_BACKEND_URL", "http://localhost:8000")
-HOUSING_API_URL = "https://jibchack-backend.onrender.com"
+HOUSING_API_URL = "http://localhost:8000"
 import re
 
 def extract_short_rent(text):
@@ -69,45 +69,51 @@ def fetch_listings_from_backend(
     limit: int = 50,
     *,
     location: str | None = None,
-    subscription_types: list[str] | None = None,
+    subscription_type: str | None = None,
     min_deposit: int | None = None,
     max_deposit: int | None = None,
     min_rent: int | None = None,
     max_rent: int | None = None,
     min_area: float | None = None,
     max_area: float | None = None,
-    unit_types: list[str] | None = None,
+    company_type: str | None = None,
 ):
     try:
-        payload = {
-            "districts": [location] if location else [],
-            "subscription_types": subscription_types or [],
-            "exclude_zero_prices": True,
-            "company_types": [],
+        start_time = time.time()
+        # Build query parameters for GET request
+        params = {
             "skip": skip,
             "limit": limit,
+            "exclude_zero_prices": True,
             "sort_by": "published_date",
             "sort_order": "desc",
         }
 
+        if location:
+            params["location"] = location
+        if subscription_type:
+            params["subscription_type"] = subscription_type
+        if company_type:
+            params["company_type"] = company_type
+
         if min_deposit is not None:
-            payload["min_deposit"] = min_deposit
+            params["min_deposit"] = min_deposit
         if max_deposit is not None:
-            payload["max_deposit"] = max_deposit
+            params["max_deposit"] = max_deposit
 
         if min_rent is not None:
-            payload["min_rent"] = min_rent
+            params["min_rent"] = min_rent
         if max_rent is not None:
-            payload["max_rent"] = max_rent
+            params["max_rent"] = max_rent
 
         if min_area is not None:
-            payload["min_area"] = min_area
+            params["min_area"] = min_area
         if max_area is not None:
-            payload["max_area"] = max_area
+            params["max_area"] = max_area
 
-        resp = requests.post(
+        resp = requests.get(
             f"{HOUSING_API_URL}/api/v1/search",
-            json=payload,
+            params=params,
             timeout=100,
         )
         resp.raise_for_status()
@@ -200,15 +206,11 @@ def fetch_listings_from_backend(
                 dedup[key] = item
 
         listings = list(dedup.values())
+        total_time = time.time() - start_time
         sub_types = sorted({ (item.get("subscription_type") or "") for item in listings })
         companies = sorted({ (item.get("company_type") or "") for item in listings })
-        print("[DEBUG] search payload:", payload)
-        print("[DEBUG] subscription_type 리스트:", sub_types)
-        print("[DEBUG] company_type 리스트:", companies)
-        print(
-            f"[DEBUG] fetched {len(raw_listings)} raw listings "
-            f"→ {len(listings)} unique listings from backend"
-        )
+        print("[SEARCH] search params:", params)
+        print(f"[SEARCH] ⏱️ Total: {total_time:.2f}s | {len(raw_listings)} raw → {len(listings)} unique listings")
 
         return listings
 
@@ -221,13 +223,15 @@ def fetch_map_points_from_backend():
     지도용 좌표를 /api/v1/map/points 에서 가져온다.
     """
     try:
+        start_time = time.time()
         resp = requests.get(
             f"{HOUSING_API_URL}/api/v1/map/points",
             timeout=30,
         )
         resp.raise_for_status()
+        api_time = time.time() - start_time
+        
         data = resp.json()
-
         points = data.get("points", []) or []
 
         # 주소 → 포인트 dict 으로 정리해두면 나중에 찾기 편해
@@ -252,11 +256,12 @@ def fetch_map_points_from_backend():
                 "id": p.get("id"),
             }
 
-        print(f"[MAP] fetched {len(points)} map points from backend")
+        total_time = time.time() - start_time
+        print(f"[MAP] ⏱️ API call: {api_time:.2f}s | Total: {total_time:.2f}s | {len(points)} points fetched")
         return addr_to_point
 
     except Exception as e:
-        print(f"[MAP] failed to fetch map points: {e}")
+        print(f"[MAP] ❌ failed to fetch map points: {e}")
         return {}    
 def kakao_geocode(address: str):
     """카카오 주소검색으로 lat, lon 반환"""
@@ -826,6 +831,8 @@ elif page == "search":
             st.session_state.selected_region = None
         if "allowDetailMarkers" not in st.session_state:
             st.session_state.allowDetailMarkers = False
+        if "cached_map_points" not in st.session_state:
+            st.session_state.cached_map_points = None  # 지도 포인트 캐시 (lazy load)
         if "applied_house_type" not in st.session_state: 
             st.session_state.applied_house_type = "전체"
         if "applied_company" not in st.session_state:
@@ -968,12 +975,8 @@ elif page == "search":
 
         # ✅ 2) UI → API 파라미터 변환
         api_location = None if applied_location == "전체" else applied_location
-
-        subscription_types: list[str] = []
-        if applied_house_type != "전체":
-            subscription_types = [applied_house_type]
-
-        unit_types: list[str] = []
+        api_subscription_type = None if applied_house_type == "전체" else applied_house_type
+        api_company_type = None if applied_company == "전체" else applied_company
 
         # ✅ 3) 가격 / 면적을 백엔드용 값으로 변환
         if applied_price:
@@ -992,13 +995,13 @@ elif page == "search":
         listings = fetch_listings_from_backend(
             skip=0,
             limit=100,
-            location=api_location,          # 🔹 지역 필터 적용
-            subscription_types=subscription_types,
-            min_deposit=min_price,          # 🔹 가격 필터 적용
+            location=api_location,                    # 🔹 지역 필터 적용
+            subscription_type=api_subscription_type,  # 🔹 주택 유형 필터 적용
+            company_type=api_company_type,            # 🔹 공급기관 필터 적용
+            min_deposit=min_price,                    # 🔹 가격 필터 적용
             max_deposit=max_price,
-            min_area=min_area,              # 🔹 면적 필터 적용
+            min_area=min_area,                        # 🔹 면적 필터 적용
             max_area=max_area,
-            unit_types=unit_types,
         )
 
         # ✅ 5) 여기서부터는 예전처럼 프론트에서 한 번 더 필터링
@@ -1352,13 +1355,17 @@ elif page == "search":
                     z_index_offset=count*1000
                 ).add_to(m)
         
-        addr_to_point = fetch_map_points_from_backend()
+        # ✅ 캐시된 지도 포인트 사용 (매번 API 호출 방지)
+        if st.session_state.get("cached_map_points") is None:
+            st.session_state.cached_map_points = fetch_map_points_from_backend()
+        addr_to_point = st.session_state.cached_map_points
+        
         for item in listings:
             # 1) 리스트에 이미 lat/lon이 들어있으면 그걸 쓰고
             lat = item.get("lat")
             lon = item.get("lon")
 
-            # 2) 없으면 주소로 카카오 호출해서 채워넣기
+            # 2) 없으면 백엔드 캐시에서 찾기
             if not lat or not lon:
                 addr = item.get("location")
                 if not addr:
@@ -1370,17 +1377,14 @@ elif page == "search":
                     lon = p["lon"]
                     item["lat"] = lat
                     item["lon"] = lon               
-                
                 else:
+                    # 3) 백엔드에도 없으면 카카오 API 호출 (fallback)
                     lat, lon = kakao_geocode(addr)
                     if not lat or not lon:
                         continue
                     item["lat"] = lat
                     item["lon"] = lon
-                    time.sleep(0.25)
-                item["lat"] = lat
-                item["lon"] = lon
-                time.sleep(0.25)  # 카카오가 너무 빠르게 많이 부르면 429 나올 수 있어서 살짝 쉬기
+                    time.sleep(0.25)  # 카카오 API rate limit 방지
             agency = (item.get("company_type") or "").strip()          # LH, SH 등
             sub_type = (item.get("subscription_type") or "").strip()   # 행복주택, 장기전세주택 등
             title_text = (item.get("name") or "") + " " + sub_type
