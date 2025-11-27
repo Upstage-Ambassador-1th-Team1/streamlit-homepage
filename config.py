@@ -8,7 +8,7 @@ load_dotenv()
 
 # API URLs
 CHAT_BACKEND_URL = os.getenv("CHAT_BACKEND_URL", "http://localhost:8000")
-HOUSING_API_URL = os.getenv("HOUSING_API_URL", "http://localhost:8000")
+HOUSING_API_URL = os.getenv("HOUSING_API_URL", "http://jibchack.limepencil.top/")
 
 # Region coordinates for map
 REGION_COORDS = {
