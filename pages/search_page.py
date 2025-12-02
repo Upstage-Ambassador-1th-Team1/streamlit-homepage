@@ -241,7 +241,16 @@ def create_region_icon(region_name: str, count: int, lat: float, lon: float):
     count_color = "#e91e63" if count > 0 else "#1E90FF"
     
     html = f"""
-    <div class="region-marker" style="
+    <div class="region-marker" onclick="
+        window.activeRegion = '{region_name}';
+        if (typeof map !== 'undefined') {{
+            map.flyTo([{lat}, {lon}], 13);
+        }}
+        document.querySelectorAll('.individual-listing-marker').forEach(function(el) {{
+            el.style.display = 'block';
+            el.style.opacity = '1';
+        }});
+    " style="
         width: 60px;
         height: 70px;
         background-color: white;
@@ -288,8 +297,11 @@ def create_listing_marker_html(item: dict) -> str:
     label = get_housing_label(title_text)
     header_text = f"{label} {agency}" if label and agency else agency or item.get("complex") or "공고"
     
+    loc = item.get("location", "")
+    region = (item.get("region") or extract_region_from_address(loc) or "").strip()
+
     return f"""
-    <div class="individual-listing-marker" style="
+    <div class="individual-listing-marker" data-region="{region}" style="
         position: relative;
         display: inline-block;
         background: #fff;
@@ -303,6 +315,7 @@ def create_listing_marker_html(item: dict) -> str:
         text-align: center;
         overflow: hidden;
         width: 95px;
+        opacity: 0;
     ">
         <div style="
             background: rgba(0,0,0);
@@ -333,10 +346,47 @@ def create_listing_marker_html(item: dict) -> str:
 
 
 class ToggleMarkers(MacroElement):
-    """No-op - markers always visible."""
+    """Toggle visibility of region vs detail markers based on zoom level."""
     _template = Template("""
     {% macro script(this, kwargs) %}
-    // Zoom toggle disabled - all markers visible
+    var map = {{ this._parent.get_name() }};
+
+    function applyZoomVisibility() {
+        var zoom = map.getZoom();
+        var regionMarkers = document.querySelectorAll('.region-marker');
+        var detailMarkers = document.querySelectorAll('.individual-listing-marker');
+        var activeRegion = window.activeRegion || null; 
+        if (zoom >= 12) {
+            regionMarkers.forEach(function(el) {
+                el.style.display = 'none';
+            });
+            detailMarkers.forEach(function(el) {
+                var markerRegion = el.getAttribute('data-region');
+                if (activeRegion && markerRegion === activeRegion) {
+                    el.style.display = 'block';
+                    el.style.opacity = '1';
+                } else {
+                    el.style.display = 'none';
+                    el.style.opacity = '0';
+                }
+            });
+        } else {
+            regionMarkers.forEach(function(el) {
+                el.style.display = 'block';
+            });
+            detailMarkers.forEach(function(el) {
+                el.style.display = 'none';
+                el.style.opacity = '0';
+            });
+        }
+    }
+    window.applyZoomVisibility = applyZoomVisibility;
+
+    map.whenReady(function() {
+        applyZoomVisibility();
+    });
+
+    map.on('zoomend', applyZoomVisibility);
     {% endmacro %}
     """)
 
