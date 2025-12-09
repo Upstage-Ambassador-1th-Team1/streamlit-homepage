@@ -161,7 +161,6 @@ def get_filtered_listings():
 
 def render_listing_card(item, idx):
     """Render a single listing card."""
-    image_src = "https://via.placeholder.com/80x80?text=🏠"
     complex_html = f"<span class='complex-pill'>{item['complex']}</span>" if item.get("complex") else ""
     
     with st.container():
@@ -177,7 +176,7 @@ def render_listing_card(item, idx):
             border-radius:16px;
             box-shadow:0 4px 12px rgba(15,23,42,0.08);
             padding:14px 16px;
-            margin-bottom:-40px;
+            margin-bottom:-29px;
         ">                    
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
                 <div class="listing-text" style="flex:1; min-width:0;">
@@ -186,7 +185,6 @@ def render_listing_card(item, idx):
                     <div class="listing-sub clamp-1">📍 {item['location']}</div>
                     <div class="listing-sub clamp-1">💰 {item.get('deposit_short', item['deposit'])}</div>
                 </div>
-                <img src="{image_src}" class="listing-img">
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -622,7 +620,7 @@ def render_search_page():
         end = start + ITEMS_PER_PAGE
         page_items = all_listings[start:end]
         
-        st.markdown('<div style="height:20px;"></div>', unsafe_allow_html=True)
+        st.markdown('<div style="height:25px;"></div>', unsafe_allow_html=True)
         
         if len(page_items) == 0:
             st.markdown(
