@@ -7,8 +7,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # API URLs
-CHAT_BACKEND_URL = os.getenv("CHAT_BACKEND_URL", "http://localhost:8000")
+# Default to the deployed backend; override with CHAT_BACKEND_URL env if needed.
+CHAT_BACKEND_URL = os.getenv("CHAT_BACKEND_URL", "https://jibchack.limepencil.top")
 HOUSING_API_URL = os.getenv("HOUSING_API_URL", "http://jibchack.limepencil.top/")
+
+# Third-party keys
+KAKAO_API_KEY = os.getenv("KAKAO_API_KEY", "")
 
 # Region coordinates for map
 REGION_COORDS = {

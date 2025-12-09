@@ -80,9 +80,9 @@ def render_chat_page():
         response_placeholder = st.empty()
         
         try:
-            api_url = f"{CHAT_BACKEND_URL}/chat/stream"
+            api_url = f"{CHAT_BACKEND_URL}/api/v1/chat/stream"
             payload = {
-                "content": st.session_state.pending_query,
+                "query": st.session_state.pending_query,
                 "session_id": st.session_state.session_id
             }
             
