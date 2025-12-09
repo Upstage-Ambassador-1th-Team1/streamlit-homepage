@@ -8,12 +8,14 @@ import time
 import requests
 from dotenv import load_dotenv
 import textwrap
+import re
+
+from config import CHAT_BACKEND_URL, HOUSING_API_URL, KAKAO_API_KEY
 
 load_dotenv()
 
-CHAT_BACKEND_URL = os.getenv("CHAT_BACKEND_URL", "http://localhost:8000")
-HOUSING_API_URL = "http://localhost:8000"
-import re
+CHAT_BACKEND_BASE = CHAT_BACKEND_URL.rstrip("/")
+HOUSING_API_BASE = HOUSING_API_URL.rstrip("/")
 
 def extract_short_rent(text):
     """
@@ -111,7 +113,7 @@ def fetch_listings_from_backend(
             params["max_area"] = max_area
 
         resp = requests.get(
-            f"{HOUSING_API_URL}/api/v1/search",
+            f"{HOUSING_API_BASE}/api/v1/search",
             params=params,
             timeout=100,
         )
@@ -224,7 +226,7 @@ def fetch_map_points_from_backend():
     try:
         start_time = time.time()
         resp = requests.get(
-            f"{HOUSING_API_URL}/api/v1/map/points",
+            f"{HOUSING_API_BASE}/api/v1/map/points",
             timeout=30,
         )
         resp.raise_for_status()
@@ -565,9 +567,9 @@ if page == "home":
         response_placeholder = st.empty()
         
         try:
-            api_url = f"{CHAT_BACKEND_URL}/chat/stream"
+            api_url = f"{CHAT_BACKEND_BASE}/api/v1/chat/stream"
             payload = {
-                "content": st.session_state.pending_query,
+                "query": st.session_state.pending_query,
                 "session_id": st.session_state.session_id
             }
             
