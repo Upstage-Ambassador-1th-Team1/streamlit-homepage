@@ -11,7 +11,6 @@ import textwrap
 
 load_dotenv()
 
-KAKAO_API_KEY = "102d0b0b719c47186ef3afa94f03e00d"  # 예: "46c0a0f1e9f1a0...."
 CHAT_BACKEND_URL = os.getenv("CHAT_BACKEND_URL", "http://localhost:8000")
 HOUSING_API_URL = "http://localhost:8000"
 import re
