@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  streamlit:
+    build: .
+    container_name: jibchack-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - CHAT_BACKEND_URL=${CHAT_BACKEND_URL:-http://host.docker.internal:8000}
+      - HOUSING_API_URL=${HOUSING_API_URL:-http://jibchack.limepencil.top/}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: jibchack-network
